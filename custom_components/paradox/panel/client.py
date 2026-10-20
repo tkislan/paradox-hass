@@ -2,7 +2,8 @@
 Async client for the web module of a Paradox IP100/IP150, ported from the bridge.
 
 The panel keeps one session, for whoever logged in last, so the client sends one
-request at a time and bounds each by ``REQUEST_TIMEOUT`` over the whole exchange.
+request at a time and bounds each by ``REQUEST_TIMEOUT`` over the whole exchange,
+and the opening of its connection by ``CONNECT_TIMEOUT``.
 Errors keep a request the panel never answered (``ParadoxConnectionError``) apart
 from an answer that failed, and none of them carries the request URL, whose query
 holds the hashed credentials.
@@ -39,10 +40,13 @@ if TYPE_CHECKING:
 
     from .models import PanelCommand, PanelLayout, PanelStatus
 
-# The panel stops accepting connections for 7 to 10 s at a time. A connection held up
-# past Linux's SYN retry at 7 s gets through only with the next one at 15 s, and the
-# exchange after that needs a few seconds more.
 REQUEST_TIMEOUT: Final = 20.0
+# The panel ignores a new connection from a source port it saw about a minute earlier,
+# together with every SYN retry of it, while connections from other ports go through.
+# On the LAN it answers a SYN in well under a millisecond, so a connection not open
+# after this long is one of those, and giving it up lets the next request connect from
+# another port. REQUEST_TIMEOUT then bounds the rest of the exchange.
+CONNECT_TIMEOUT: Final = 2.0
 INDEX_RETRIES: Final = 10
 INDEX_RETRY_WAIT: Final = 1.0
 LOGIN_TITLE: Final = "Paradox IP Module"
@@ -264,10 +268,18 @@ class ParadoxClient:
                     f"http://{self._host}{path}",
                     params=params,
                     headers=self._browser_headers if browser_headers else None,
+                    timeout=aiohttp.ClientTimeout(
+                        total=None, sock_connect=CONNECT_TIMEOUT
+                    ),
                 )
                 # The body is read before the status is judged: an error status whose
                 # body is cut short is a request the panel never answered.
                 body = await response.read()
+        except aiohttp.ConnectionTimeoutError:
+            # A TimeoutError too, which would be reported as the 20 s deadline.
+            error = ParadoxConnectionError(
+                f"connect timeout of {CONNECT_TIMEOUT * 1000:.0f}ms exceeded"
+            )
         except TimeoutError:
             error = ParadoxTimeoutError()
         except (aiohttp.ClientError, OSError) as exc:

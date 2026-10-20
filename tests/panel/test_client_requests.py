@@ -281,10 +281,40 @@ async def test_stalled_status_times_out_and_the_client_closes_the_connection(
     assert fake_panel.request_lines == ["GET /statuslive.html"]
 
 
+@pytest.mark.usefixtures("fast_timing")
+async def test_connection_that_never_opens_fails_after_the_connect_timeout(
+    unopened_host: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Far from the connect timeout, so that a stalled event loop cannot make the
+    # deadline win.
+    monkeypatch.setattr(client_module, "REQUEST_TIMEOUT", 5.0)
+    attempts: list[object] = []
+
+    async def count_attempt(*args: object) -> None:
+        attempts.append(args)
+
+    trace = aiohttp.TraceConfig()
+    trace.on_connection_create_start.append(count_attempt)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+
+    async with aiohttp.ClientSession(trace_configs=[trace]) as session:
+        panel_client = ParadoxClient(session, unopened_host, "user", "1234")
+        with pytest.raises(ParadoxConnectionError) as caught:
+            await panel_client.async_get_status()
+
+    # Exactly this class: the 20 s deadline would give its ParadoxTimeoutError subclass.
+    assert type(caught.value) is ParadoxConnectionError
+    assert str(caught.value) == "connect timeout of 100ms exceeded"
+    assert len(attempts) == 1
+    assert loop.time() - started >= client_module.CONNECT_TIMEOUT - TIMER_SLACK
+
+
 def test_production_timing_is_the_bridges_and_the_timeout_message_names_it() -> None:
     # No fast_timing: it replaces these constants, so no other test sees the production
     # values.
     assert client_module.REQUEST_TIMEOUT == 20.0
+    assert client_module.CONNECT_TIMEOUT == 2.0
     assert client_module.INDEX_RETRY_WAIT == 1.0
     assert str(ParadoxTimeoutError()) == (
         f"timeout of {client_module.REQUEST_TIMEOUT * 1000:.0f}ms exceeded"

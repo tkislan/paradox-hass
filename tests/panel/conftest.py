@@ -14,8 +14,9 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def fast_timing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run the client's deadline and index retry wait at 1/20 of production."""
+    """Run the deadline, connect timeout and index retry wait at 1/20 of production."""
     monkeypatch.setattr(client_module, "REQUEST_TIMEOUT", 1.0)
+    monkeypatch.setattr(client_module, "CONNECT_TIMEOUT", 0.1)
     monkeypatch.setattr(client_module, "INDEX_RETRY_WAIT", 0.05)
 
 
