@@ -12,6 +12,7 @@ from custom_components.paradox.panel.errors import (
 )
 from custom_components.paradox.panel.models import PanelLayout
 from tests.fake_panel import FakeResponse, Hang, Reset, render_index_page
+from tests.logs import problem_records
 from tests.panel.expected_errors import assert_error
 from tests.spec_tables import spec_rows, spec_text
 
@@ -187,8 +188,7 @@ def assert_login_outcome(expected: dict[str, Any], outcome: object) -> None:
 def logged_problems(caplog: pytest.LogCaptureFixture) -> list[tuple[str, int, str]]:
     return [
         (record.name, record.levelno, record.getMessage())
-        for record in caplog.records
-        if record.levelno >= logging.WARNING
+        for record in problem_records(caplog)
     ]
 
 

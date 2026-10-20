@@ -1,6 +1,5 @@
 import asyncio
 import gc
-import logging
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl, urlsplit
 
@@ -26,6 +25,7 @@ from tests.fake_panel import (
     Stall,
     render_index_page,
 )
+from tests.logs import problem_records
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -76,11 +76,7 @@ async def wait_until(condition: Callable[[], object]) -> None:
 
 
 def problems(caplog: pytest.LogCaptureFixture) -> list[str]:
-    return [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno >= logging.WARNING
-    ]
+    return [record.getMessage() for record in problem_records(caplog)]
 
 
 def test_index_page_drops_zones_past_slot_32() -> None:

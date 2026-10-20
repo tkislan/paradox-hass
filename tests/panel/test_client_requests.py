@@ -28,6 +28,7 @@ from tests.fake_panel import (
     Reset,
     Stall,
 )
+from tests.logs import problem_records
 from tests.panel.expected_errors import assert_error
 from tests.spec_tables import spec_rows, spec_text
 
@@ -80,11 +81,7 @@ async def wait_until(condition: Callable[[], object]) -> None:
 
 
 def problems(caplog: pytest.LogCaptureFixture) -> list[str]:
-    return [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno >= logging.WARNING
-    ]
+    return [record.getMessage() for record in problem_records(caplog)]
 
 
 def paths(panel: FakePanel) -> list[str]:
