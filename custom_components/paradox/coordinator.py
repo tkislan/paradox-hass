@@ -19,8 +19,6 @@ type ParadoxConfigEntry = ConfigEntry[ParadoxCoordinator]
 
 
 class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
-    """Polls the status page of one panel and keeps its web session alive."""
-
     config_entry: ParadoxConfigEntry
     layout: PanelLayout
 
@@ -49,9 +47,12 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
     async def _async_update_data(self) -> PanelStatus:
         try:
             return await self.client.async_get_status()
-        except ParadoxClosedError:
+        except ParadoxClosedError as err:
             # The refresh was already waiting for the client when it closed, and the
-            # entry is going away, so a failed poll would only be noise.
+            # entry is going away, so a failed poll would only be noise. Without a
+            # first poll there is nothing to keep.
+            if self.data is None:
+                raise UpdateFailed(str(err)) from err
             return self.data
         except ParadoxError as err:
             raise UpdateFailed(str(err)) from err

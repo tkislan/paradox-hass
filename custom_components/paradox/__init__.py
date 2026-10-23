@@ -38,20 +38,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ParadoxConfigEntry) -> b
 
     try:
         await coordinator.async_config_entry_first_refresh()
+        entry.runtime_data = coordinator
+
+        entry.async_on_unload(
+            async_track_time_interval(
+                hass,
+                coordinator.async_keep_alive,
+                KEEP_ALIVE_INTERVAL,
+                cancel_on_shutdown=True,
+            )
+        )
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except BaseException:
         await client.async_close()
         raise
-    entry.runtime_data = coordinator
-
-    entry.async_on_unload(
-        async_track_time_interval(
-            hass,
-            coordinator.async_keep_alive,
-            KEEP_ALIVE_INTERVAL,
-            cancel_on_shutdown=True,
-        )
-    )
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 

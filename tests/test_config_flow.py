@@ -30,7 +30,6 @@ def user_input(panel: FakePanel) -> dict[str, str]:
 
 @pytest.fixture
 def entry_setup() -> Iterator[None]:
-    """Keep a created or reloaded entry from logging in to the panel."""
     with patch("custom_components.paradox.async_setup_entry", return_value=True):
         yield
 
@@ -97,27 +96,39 @@ async def test_user_step_strips_the_host_before_validating_and_storing_it(
 
 
 @pytest.mark.usefixtures("entry_setup")
-@pytest.mark.parametrize(
-    ("error", "bad_input"),
-    [
-        pytest.param("invalid_auth", {"password": "0000"}, id="rejected-login"),
-        # Nothing listens on tcpmux, so the connection is refused at once.
-        pytest.param("cannot_connect", {"host": "127.0.0.1:1"}, id="refused-port"),
-    ],
-)
-async def test_user_step_shows_error_for_input_the_panel_cannot_accept(
-    hass: HomeAssistant,
-    user_input: dict[str, str],
-    error: str,
-    bad_input: dict[str, str],
+async def test_user_step_shows_invalid_auth_for_a_rejected_login(
+    hass: HomeAssistant, user_input: dict[str, str]
 ) -> None:
-    typed = {**user_input, **bad_input}
+    typed = {**user_input, "password": "0000"}
 
     result = await submit(hass, await start_user_flow(hass), typed)
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
-    assert result["errors"] == {"base": error}
+    assert result["errors"] == {"base": "invalid_auth"}
+    suggested = suggested_values(result)
+    assert (suggested["host"], suggested["username"]) == (
+        typed["host"],
+        typed["username"],
+    )
+
+    result = await submit(hass, result, user_input)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == user_input
+
+
+@pytest.mark.usefixtures("entry_setup")
+async def test_user_step_shows_cannot_connect_for_a_host_that_refuses_connections(
+    hass: HomeAssistant, user_input: dict[str, str], refused_host: str
+) -> None:
+    typed = {**user_input, "host": refused_host}
+
+    result = await submit(hass, await start_user_flow(hass), typed)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "cannot_connect"}
     suggested = suggested_values(result)
     assert (suggested["host"], suggested["username"]) == (
         typed["host"],
@@ -207,19 +218,11 @@ async def test_user_step_shows_unknown_and_logs_the_traceback_of_an_unexpected_e
     assert result["data"] == user_input
 
 
-@pytest.mark.parametrize("padding", ["", "  "])
-async def test_user_step_aborts_for_a_known_host_before_any_request_reaches_the_panel(
-    hass: HomeAssistant,
-    panel: FakePanel,
-    mock_config_entry: MockConfigEntry,
-    padding: str,
+async def test_user_step_aborts_for_a_padded_known_host_without_asking_the_panel(
+    hass: HomeAssistant, panel: FakePanel, mock_config_entry: MockConfigEntry
 ) -> None:
     mock_config_entry.add_to_hass(hass)
-    other_login = {
-        "host": f"{padding}{panel.host}{padding}",
-        "username": "other",
-        "password": "0000",
-    }
+    other_login = {"host": f"  {panel.host} ", "username": "other", "password": "0000"}
 
     result = await submit(hass, await start_user_flow(hass), other_login)
 

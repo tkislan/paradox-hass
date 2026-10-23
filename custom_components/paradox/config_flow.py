@@ -43,7 +43,7 @@ async def _validate(
     hass: HomeAssistant, host: str, username: str, password: str
 ) -> str | None:
     """
-    Log in and read the status page, returning the error key or ``None``.
+    Return the error key of a failed validation, or ``None``.
 
     The login ends any other session on the panel, and the logout at the end ends this
     one, so the entry's own client logs in afresh.

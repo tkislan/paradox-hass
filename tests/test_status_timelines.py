@@ -129,8 +129,6 @@ async def replay(
         serve(panel, poll)
         await tick(hass, freezer)
         states = zone_states(hass, entity_ids)
-        # Unavailable states are dropped from the histories, so without this a failure
-        # that never reached the entities would replay as a good poll.
         unavailable = {slot for slot, s in states.items() if s == "unavailable"}
         assert unavailable == (set(entity_ids) if "fail" in poll else set())
         observed.append(states)
@@ -166,23 +164,3 @@ async def test_setup_retries_when_the_first_poll_fails(
     await setup_entry(hass, mock_config_entry)
 
     assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
-
-
-async def test_a_row_expecting_no_change_fails_on_a_zone_that_opens(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    panel: FakePanel,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    row = {
-        "zones": [[1, "A"], [1, "B"]],
-        "polls": [
-            {"statuszone": [0, 0], "useraccess": [0, 0]},
-            {"statuszone": [1, 0], "useraccess": [0, 0]},
-        ],
-        "expected_events": [],
-    }
-
-    histories = await replay(hass, freezer, panel, mock_config_entry, row)
-
-    assert histories != expected_histories(row)

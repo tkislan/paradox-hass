@@ -36,8 +36,8 @@ async def fake_panel(
             credentials={golden["session"]: (golden["u"], golden["p"])},
         )
     )
-    # aiohttp's access logger raises under freezegun, whose ``localtime()`` has no
-    # ``tm_gmtoff``, and logs an error for every request.
+    # aiohttp's access logger raises under freezegun, whose ``localtime()`` returns
+    # ``None`` for ``tm_gmtoff``, and logs an error for every request.
     server = await aiohttp_server(panel.app(), access_log=None)
     panel.host = f"{server.host}:{server.port}"
     yield panel
@@ -68,6 +68,13 @@ def unopened_host(socket_enabled: None) -> Iterator[str]:
         yield f"127.0.0.1:{server.getsockname()[1]}"
 
 
+@pytest.fixture
+def refused_host(socket_enabled: None) -> Iterator[str]:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        yield f"127.0.0.1:{sock.getsockname()[1]}"
+
+
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     """Let Home Assistant load ``custom_components/paradox`` in every test."""
@@ -75,7 +82,6 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
 
 @pytest.fixture
 def panel(fake_panel: FakePanel) -> FakePanel:
-    """Return the fake panel, answering the login page while logged out."""
     fake_panel.require_login = True
     return fake_panel
 

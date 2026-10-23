@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import socket
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Final
 from unittest.mock import AsyncMock, patch
@@ -30,13 +29,14 @@ from tests.fake_panel import (
     PanelRequest,
     PanelResult,
     Reset,
+    render_index_page,
     render_login_page,
 )
-from tests.helpers import setup_entry, tick
+from tests.helpers import entity_id_for, setup_entry, tick
 from tests.logs import problem_records
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Mapping
 
     from freezegun.api import FrozenDateTimeFactory
     from homeassistant.core import HomeAssistant
@@ -55,14 +55,6 @@ ZONE_ENTITY_IDS: Final = (
     "binary_sensor.paradox_chodba",
 )
 SLOT_0_OPEN: Final = [1, *[0] * 31]
-
-
-@pytest.fixture
-def refused_host(socket_enabled: None) -> Iterator[str]:
-    """Give a ``host:port`` on which nothing listens, so a connection is refused."""
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        yield f"127.0.0.1:{sock.getsockname()[1]}"
 
 
 def zone_states(hass: HomeAssistant) -> dict[str, str]:
@@ -97,7 +89,6 @@ async def advance(
 
 
 def hang_once(panel: FakePanel, path: str) -> asyncio.Event:
-    """Hang the next request for ``path``, and return the event set when it arrives."""
     arrived = asyncio.Event()
 
     def hang(_request: PanelRequest) -> PanelResult:
@@ -201,10 +192,7 @@ async def test_zone_with_a_blank_name_is_named_after_its_slot_number(
 
     await setup_entry(hass, mock_config_entry)
 
-    entry_id = mock_config_entry.entry_id
-    zone_4 = er.async_get(hass).async_get_entity_id(
-        Platform.BINARY_SENSOR, DOMAIN, f"{entry_id}_zone_3"
-    )
+    zone_4 = entity_id_for(hass, mock_config_entry, Platform.BINARY_SENSOR, "zone_3")
     assert zone_4 == "binary_sensor.paradox_zone_4"
     state = hass.states.get("binary_sensor.paradox_zone_4")
     assert state is not None
@@ -353,7 +341,6 @@ async def test_unloading_the_entry_logs_the_panel_out_and_stops_all_activity(
     caplog.clear()
     await tick(hass, freezer, 10)
     assert len(panel.requests) == seen_at_unload
-    # A keep-alive timer left running would still fire, and log the closed client.
     assert [r for r in caplog.records if r.name.startswith(PACKAGE_LOGGER)] == []
 
 
@@ -538,6 +525,40 @@ async def test_first_poll_failure_retries_the_setup_and_logs_the_panel_out(
     assert panel.request_lines[-1] == LOGOUT
     assert zone_states(hass) == {}
     assert tracebacks(caplog) == []
+
+
+async def test_home_assistant_stop_during_the_login_retries_the_setup_after_logging_out(
+    hass: HomeAssistant,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def stop(_request: PanelRequest) -> PanelResult:
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+        return FakeResponse(body=render_index_page(panel.zones))
+
+    panel.respond_with("/index.html", stop, times=1)
+
+    await setup_entry(hass, mock_config_entry)
+
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
+    assert panel.request_lines[-1] == LOGOUT
+    assert zone_states(hass) == {}
+    assert tracebacks(caplog) == []
+
+
+async def test_failed_platform_setup_logs_the_panel_out(
+    hass: HomeAssistant, panel: FakePanel, mock_config_entry: MockConfigEntry
+) -> None:
+    with patch.object(
+        hass.config_entries,
+        "async_forward_entry_setups",
+        AsyncMock(side_effect=RuntimeError),
+    ):
+        await setup_entry(hass, mock_config_entry)
+
+    assert mock_config_entry.state is ConfigEntryState.SETUP_ERROR
+    assert panel.request_lines[-1] == LOGOUT
 
 
 async def test_zone_taken_out_of_use_disappears_after_a_reload(
