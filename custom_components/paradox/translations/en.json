@@ -1,0 +1,42 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to the Paradox web module",
+        "description": "The panel allows one web session at a time. Adding the integration logs in to the web module, which ends the session of any other client, such as a browser or another bridge, and the integration keeps its own session open while it runs.",
+        "data": {
+          "host": "Host",
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "The address of the IP100/IP150 web module on your network, for example `192.168.1.50`.",
+          "username": "The user name you log in with on the web module's page.",
+          "password": "The password you log in with on the web module's page."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Paradox",
+        "description": "The web module rejected the saved credentials. Enter the user name and password you log in with on its page. The integration takes over the panel's single web session, which ends the session of any other client.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "username": "The user name you log in with on the web module's page.",
+          "password": "The password you log in with on the web module's page."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "unsupported_firmware": "The web module answered the login but not the status page. IP150 firmware 5.x is not supported.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured",
+      "reauth_successful": "Re-authentication was successful"
+    }
+  }
+}
