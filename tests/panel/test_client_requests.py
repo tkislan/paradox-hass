@@ -411,6 +411,19 @@ async def test_answered_status_failure_is_not_a_connection_error(
     assert getattr(caught, "status", None) == status
 
 
+async def test_error_status_is_an_http_error_when_the_session_raises_for_status(
+    fake_panel: FakePanel,
+) -> None:
+    fake_panel.respond_with("/statuslive.html", FakeResponse(status=503, body="busy"))
+
+    async with aiohttp.ClientSession(raise_for_status=True) as session:
+        panel_client = ParadoxClient(session, fake_panel.host, "user", "1234")
+        with pytest.raises(ParadoxHttpError) as caught:
+            await panel_client.async_get_status()
+
+    assert caught.value.status == 503
+
+
 async def test_status_299_is_a_success(
     fake_panel: FakePanel, client: ParadoxClient
 ) -> None:

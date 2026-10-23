@@ -271,6 +271,7 @@ class ParadoxClient:
                     timeout=aiohttp.ClientTimeout(
                         total=None, sock_connect=CONNECT_TIMEOUT
                     ),
+                    raise_for_status=False,
                 )
                 # The body is read before the status is judged: an error status whose
                 # body is cut short is a request the panel never answered.
