@@ -1,7 +1,17 @@
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Final
 
 ZONE_OPEN_CODES: Final = frozenset({1, 2, 4, 6, 9})
+
+
+class PanelCommand(StrEnum):
+    """The ``value`` of a ``GET /statuslive.html?area=NN&value=X`` command."""
+
+    ARM = "r"
+    STAY = "s"
+    SLEEP = "p"
+    DISARM = "d"
 
 
 @dataclass(frozen=True, slots=True)
