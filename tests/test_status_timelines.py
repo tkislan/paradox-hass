@@ -1,0 +1,166 @@
+"""Replay the zone timelines of the bridge's status_machine.json in Home Assistant."""
+
+from itertools import groupby
+from typing import TYPE_CHECKING, Any, Final
+
+import pytest
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import Platform
+
+from tests.fake_panel import ZONE_SLOTS, FakeResponse, Reset
+from tests.helpers import entity_id_for, setup_entry, tick
+from tests.spec_tables import spec_rows, spec_text
+
+if TYPE_CHECKING:
+    from _pytest.mark import ParameterSet
+    from freezegun.api import FrozenDateTimeFactory
+    from homeassistant.core import HomeAssistant
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from tests.fake_panel import FakePanel
+
+STATUS_PATH: Final = "/statuslive.html"
+GROUPS: Final = (
+    "first_poll",
+    "sensor_codes",
+    "transitions",
+    "zone_indexing",
+    "failures",
+)
+ROW_KEYS: Final = {"zones", "polls", "expected_events"}
+
+type Row = dict[str, Any]
+type Histories = dict[int, list[str]]
+
+
+ROWS: Final[list[tuple[str, Row]]] = [
+    (group, param.values[0])
+    for group in GROUPS
+    for param in spec_rows("status_machine", group, ROW_KEYS)
+]
+
+
+def _param(group: str, row: Row) -> ParameterSet:
+    return pytest.param(row, id=f"{group}/{row['name']}")
+
+
+FAILED_FIRST_POLL: Final = [
+    _param(group, row) for group, row in ROWS if "fail" in row["polls"][0]
+]
+SERVED_FIRST_POLL: Final = [
+    _param(group, row) for group, row in ROWS if "fail" not in row["polls"][0]
+]
+
+
+def serve(panel: FakePanel, poll: Row) -> None:
+    match poll:
+        case {"fail": {"connection": _}}:
+            # aiohttp resends a GET whose connection dropped before any response, so
+            # one poll reaches the panel twice.
+            panel.respond_with(STATUS_PATH, Reset(), times=2)
+        case {"fail": {"page": page}}:
+            panel.respond_with(STATUS_PATH, FakeResponse(body=spec_text(page)), times=1)
+        case {"fail": {"status": status} as fail}:
+            panel.respond_with(
+                STATUS_PATH,
+                FakeResponse(status=status, body=fail.get("body") or "error"),
+                times=1,
+            )
+        case {"page": page}:
+            panel.respond_with(STATUS_PATH, FakeResponse(body=spec_text(page)), times=1)
+        case {"statuszone": _} | {"useraccess": _}:
+            panel.set_status(
+                statuszone=poll.get("statuszone"), useraccess=poll.get("useraccess")
+            )
+        case _:
+            raise ValueError(f"Unknown poll {poll}")
+
+
+def zone_entity_ids(hass: HomeAssistant, entry: MockConfigEntry) -> dict[int, str]:
+    ids = {
+        slot: entity_id_for(hass, entry, Platform.BINARY_SENSOR, f"zone_{slot}")
+        for slot in range(ZONE_SLOTS)
+    }
+    return {slot: entity_id for slot, entity_id in ids.items() if entity_id}
+
+
+def zone_states(hass: HomeAssistant, entity_ids: dict[int, str]) -> dict[int, str]:
+    states = {
+        slot: hass.states.get(entity_id) for slot, entity_id in entity_ids.items()
+    }
+    assert None not in states.values(), f"Entities without a state: {entity_ids}"
+    return {slot: state.state for slot, state in states.items()}
+
+
+def normalised(states: list[str]) -> list[str]:
+    """Drop ``unavailable``, repeats and the closed state the bridge assumed first."""
+    changes = [state for state, _ in groupby(s for s in states if s != "unavailable")]
+    return changes[1:] if changes[:1] == ["off"] else changes
+
+
+def expected_histories(row: Row) -> Histories:
+    histories: Histories = {
+        slot: [] for slot, (bitmask, _) in enumerate(row["zones"]) if bitmask
+    }
+    for event in row["expected_events"]:
+        if event[0] == "sensorChanged":
+            _, slot, is_open = event
+            histories[int(slot)].append("on" if is_open else "off")
+    return histories
+
+
+async def replay(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    entry: MockConfigEntry,
+    row: Row,
+) -> Histories:
+    panel.zones = [(bitmask, name) for bitmask, name in row["zones"]]
+    first, *later = row["polls"]
+    serve(panel, first)
+    await setup_entry(hass, entry)
+    assert entry.state is ConfigEntryState.LOADED
+
+    entity_ids = zone_entity_ids(hass, entry)
+
+    observed = [zone_states(hass, entity_ids)]
+    for poll in later:
+        serve(panel, poll)
+        await tick(hass, freezer)
+        states = zone_states(hass, entity_ids)
+        unavailable = {slot for slot, s in states.items() if s == "unavailable"}
+        assert unavailable == (set(entity_ids) if "fail" in poll else set())
+        observed.append(states)
+
+    return {
+        slot: normalised([states[slot] for states in observed]) for slot in entity_ids
+    }
+
+
+@pytest.mark.parametrize("row", SERVED_FIRST_POLL)
+async def test_zone_states_follow_the_polls(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+    row: Row,
+) -> None:
+    histories = await replay(hass, freezer, panel, mock_config_entry, row)
+
+    assert histories == expected_histories(row)
+
+
+@pytest.mark.parametrize("row", FAILED_FIRST_POLL)
+async def test_setup_retries_when_the_first_poll_fails(
+    hass: HomeAssistant,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+    row: Row,
+) -> None:
+    panel.zones = [(bitmask, name) for bitmask, name in row["zones"]]
+    serve(panel, row["polls"][0])
+
+    await setup_entry(hass, mock_config_entry)
+
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY

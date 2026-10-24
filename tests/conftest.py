@@ -3,7 +3,9 @@ import socket
 from typing import TYPE_CHECKING
 
 import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.paradox.const import DOMAIN
 from tests.fake_panel import FakePanel, FakePanelOptions
 from tests.spec_tables import load_spec
 
@@ -34,7 +36,9 @@ async def fake_panel(
             credentials={golden["session"]: (golden["u"], golden["p"])},
         )
     )
-    server = await aiohttp_server(panel.app())
+    # aiohttp's access logger raises under freezegun, whose ``localtime()`` returns
+    # ``None`` for ``tm_gmtoff``, and logs an error for every request.
+    server = await aiohttp_server(panel.app(), access_log=None)
     panel.host = f"{server.host}:{server.port}"
     yield panel
     panel.release()
@@ -62,3 +66,30 @@ def unopened_host(socket_enabled: None) -> Iterator[str]:
                     "unopened_host: the kernel accepted a connection past the backlog"
                 )
         yield f"127.0.0.1:{server.getsockname()[1]}"
+
+
+@pytest.fixture
+def refused_host(socket_enabled: None) -> Iterator[str]:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        yield f"127.0.0.1:{sock.getsockname()[1]}"
+
+
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
+    """Let Home Assistant load ``custom_components/paradox`` in every test."""
+
+
+@pytest.fixture
+def panel(fake_panel: FakePanel) -> FakePanel:
+    fake_panel.require_login = True
+    return fake_panel
+
+
+@pytest.fixture
+def mock_config_entry(panel: FakePanel) -> MockConfigEntry:
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title="Paradox",
+        data={"host": panel.host, "username": "user", "password": "1234"},
+    )
