@@ -1,5 +1,5 @@
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
@@ -71,6 +71,10 @@ async def _validate(
 
 class ParadoxConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
+    _host: str | None = None
+
+    def is_matching(self, other_flow: Self) -> bool:
+        return other_flow._host == self._host
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -79,9 +83,23 @@ class ParadoxConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
             self._async_abort_entries_match({CONF_HOST: host})
-            error = await _validate(
-                self.hass, host, user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
-            )
+            # Logging in would end the panel session of another flow validating this
+            # host, or both flows would create an entry.
+            self._host = host
+            if self.hass.config_entries.flow.async_has_matching_flow(self):
+                return self.async_abort(reason="already_in_progress")
+            try:
+                error = await _validate(
+                    self.hass,
+                    host,
+                    user_input[CONF_USERNAME],
+                    user_input[CONF_PASSWORD],
+                )
+            except BaseException:
+                # Home Assistant keeps a flow whose step raised, for example one
+                # cancelled with the browser's request, and it would block the host.
+                self._host = None
+                raise
             if error is None:
                 return self.async_create_entry(
                     title=TITLE,
@@ -91,6 +109,7 @@ class ParadoxConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_PASSWORD: user_input[CONF_PASSWORD],
                     },
                 )
+            self._host = None
             errors["base"] = error
         return self.async_show_form(
             step_id="user",

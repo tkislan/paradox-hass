@@ -1,3 +1,4 @@
+import asyncio
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -10,7 +11,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.paradox.const import DOMAIN, LOGGER
 from custom_components.paradox.panel.client import ParadoxClient
-from tests.fake_panel import FakeResponse
+from tests.fake_panel import FakeResponse, Hang
 from tests.logs import problem_records
 
 if TYPE_CHECKING:
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigFlowResult
     from homeassistant.core import HomeAssistant
 
-    from tests.fake_panel import FakePanel, PanelResult
+    from tests.fake_panel import FakePanel, PanelRequest, PanelResult
 
 
 @pytest.fixture
@@ -231,6 +232,63 @@ async def test_user_step_aborts_for_a_padded_known_host_without_asking_the_panel
     assert panel.requests == []
 
 
+@pytest.mark.usefixtures("entry_setup")
+async def test_user_step_aborts_while_another_flow_validates_the_same_host(
+    hass: HomeAssistant, panel: FakePanel, user_input: dict[str, str]
+) -> None:
+    first, second = [await start_user_flow(hass) for _ in range(2)]
+
+    results = await asyncio.gather(
+        submit(hass, first, user_input), submit(hass, second, user_input)
+    )
+
+    assert [r["type"] for r in results] == [
+        FlowResultType.CREATE_ENTRY,
+        FlowResultType.ABORT,
+    ]
+    assert results[1]["reason"] == "already_in_progress"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert len(panel.requests_to("/default.html")) == 1
+
+
+@pytest.mark.usefixtures("entry_setup")
+async def test_user_step_creates_entry_while_a_failed_flow_for_the_same_host_is_open(
+    hass: HomeAssistant, user_input: dict[str, str]
+) -> None:
+    failed = await submit(
+        hass, await start_user_flow(hass), {**user_input, "password": "0000"}
+    )
+    assert failed["errors"] == {"base": "invalid_auth"}
+
+    result = await submit(hass, await start_user_flow(hass), user_input)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+@pytest.mark.usefixtures("entry_setup")
+async def test_user_step_creates_entry_after_a_flow_for_the_same_host_was_cancelled(
+    hass: HomeAssistant, panel: FakePanel, user_input: dict[str, str]
+) -> None:
+    arrived = asyncio.Event()
+
+    def hang(_request: PanelRequest) -> PanelResult:
+        arrived.set()
+        return Hang()
+
+    panel.respond_with("/login_page.html", hang, times=1)
+    cancelled = asyncio.create_task(
+        submit(hass, await start_user_flow(hass), user_input)
+    )
+    await arrived.wait()
+    cancelled.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled
+
+    result = await submit(hass, await start_user_flow(hass), user_input)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
 async def test_reauth_form_suggests_the_username_of_the_entry(
     hass: HomeAssistant, stale_entry: MockConfigEntry
 ) -> None:
@@ -288,6 +346,7 @@ async def test_reauth_with_accepted_credentials_updates_and_reloads_the_entry(
         "error.unsupported_firmware",
         "error.unknown",
         "abort.already_configured",
+        "abort.already_in_progress",
         "abort.reauth_successful",
     ],
 )
