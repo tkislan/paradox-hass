@@ -26,6 +26,6 @@ Left out:
 - `tests/data/login_url.txt` of the bridge: it holds a real host and hashed credentials.
 - The bridge's `system_scenarios.json`, `schemas.ts` and `crypto_reference.py`.
 
-`status_machine.json` is copied for a later plan and is not loaded by any test yet.
+`tests/test_status_timelines.py` replays the zone groups of `status_machine.json` in Home Assistant; no test loads its `armed_codes` and `status_poll_cadence` groups yet.
 
 `tests/spec_tables.py` loads these files; a test that loads a group rejects any row of it with a key its format does not allow. The format of every row is defined by `tests/spec/schemas.ts` of the bridge.
