@@ -100,6 +100,8 @@ def _check_keys(
 def _check_fault(where: str, fault: Mapping[str, Any]) -> None:
     keys = FAULT_KEYS | {"page"} if fault.get("kind") == "page" else FAULT_KEYS
     _check_keys(f"{where}, fault", fault, keys)
+    if fault.get("kind") == "hang":
+        raise ValueError(f"{where}, fault: kind 'hang' cannot be played")
 
 
 def _check_expect(where: str, expect: Mapping[str, Any]) -> None:
@@ -132,7 +134,8 @@ def scenario_rows(spec: Mapping[str, Any]) -> list[ParameterSet]:
 
     Raises ``ValueError`` naming the object, and its row if it is in one, when an
     object of the file has a key its format does not allow, a row or setup lacks one
-    it requires, or an expect has more than one way to check the requests.
+    it requires, an expect has more than one way to check the requests, or a fault
+    has kind ``hang``, which cannot be played.
     """
     _check_keys("ha_scenarios.json", spec, FILE_KEYS)
     params = []

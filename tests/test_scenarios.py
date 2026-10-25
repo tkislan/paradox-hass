@@ -224,6 +224,34 @@ def test_loading_rejects_a_page_on_a_fault_of_another_kind() -> None:
         scenario_rows(spec)
 
 
+@pytest.mark.parametrize(
+    ("part", "where"),
+    [
+        pytest.param(
+            lambda spec: row_of(spec)["panel"]["faults"][0],
+            f"{ROW_AT}, panel, fault",
+            id="panel",
+        ),
+        pytest.param(
+            lambda spec: row_of(spec)["steps"][0]["panel_fault"],
+            f"{ROW_AT}, step 1, fault",
+            id="step",
+        ),
+    ],
+)
+def test_loading_rejects_a_hang_fault(
+    part: Callable[[dict[str, Any]], dict[str, Any]], where: str
+) -> None:
+    spec = valid_spec()
+    fault = part(spec)
+    fault.pop("page", None)
+    fault["kind"] = "hang"
+
+    message = f"{where}: kind 'hang' cannot be played"
+    with pytest.raises(ValueError, match=rf"^{re.escape(message)}$"):
+        scenario_rows(spec)
+
+
 async def test_a_row_that_holds_passes(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
