@@ -1,0 +1,138 @@
+{
+  "_comment": "State of an alarm panel entity, for custom_components/paradox/alarm_control_panel.py. Written in this repository, not copied from the bridge. Rows of rows: { name, useraccess, alarms, index, expected }. useraccess is the area state codes of tbl_useraccess (first entry is area 1), alarms the 0-based indexes of the areas in alarm (tbl_alarmes), index the 0-based area asked about. expected is a Home Assistant alarm state string, or \"unknown\" when the entity has no state. An area in alarm is triggered whatever its code.",
+  "rows": [
+    {
+      "name": "code 0, area unused",
+      "useraccess": [0],
+      "alarms": [],
+      "index": 0,
+      "expected": "unknown"
+    },
+    {
+      "name": "code 1, disarmed",
+      "useraccess": [1],
+      "alarms": [],
+      "index": 0,
+      "expected": "disarmed"
+    },
+    {
+      "name": "code 2, armed",
+      "useraccess": [2],
+      "alarms": [],
+      "index": 0,
+      "expected": "armed_away"
+    },
+    {
+      "name": "code 3, in alarm",
+      "useraccess": [3],
+      "alarms": [],
+      "index": 0,
+      "expected": "triggered"
+    },
+    {
+      "name": "code 4, sleep",
+      "useraccess": [4],
+      "alarms": [],
+      "index": 0,
+      "expected": "armed_night"
+    },
+    {
+      "name": "code 5, stay",
+      "useraccess": [5],
+      "alarms": [],
+      "index": 0,
+      "expected": "armed_home"
+    },
+    {
+      "name": "code 6, entry delay",
+      "useraccess": [6],
+      "alarms": [],
+      "index": 0,
+      "expected": "pending"
+    },
+    {
+      "name": "code 7, exit delay",
+      "useraccess": [7],
+      "alarms": [],
+      "index": 0,
+      "expected": "arming"
+    },
+    {
+      "name": "code 8, ready",
+      "useraccess": [8],
+      "alarms": [],
+      "index": 0,
+      "expected": "disarmed"
+    },
+    {
+      "name": "code 9, not ready",
+      "useraccess": [9],
+      "alarms": [],
+      "index": 0,
+      "expected": "disarmed"
+    },
+    {
+      "name": "code 10, instant",
+      "useraccess": [10],
+      "alarms": [],
+      "index": 0,
+      "expected": "armed_home"
+    },
+    {
+      "name": "code 11, not in the code table",
+      "useraccess": [11],
+      "alarms": [],
+      "index": 0,
+      "expected": "unknown"
+    },
+    {
+      "name": "disarmed area listed in alarm",
+      "useraccess": [1],
+      "alarms": [0],
+      "index": 0,
+      "expected": "triggered"
+    },
+    {
+      "name": "area in alarm with a code outside the table",
+      "useraccess": [11],
+      "alarms": [0],
+      "index": 0,
+      "expected": "triggered"
+    },
+    {
+      "name": "alarm of the second area",
+      "useraccess": [1, 1],
+      "alarms": [1],
+      "index": 1,
+      "expected": "triggered"
+    },
+    {
+      "name": "alarm of another area does not trigger this one",
+      "useraccess": [2, 1],
+      "alarms": [1],
+      "index": 0,
+      "expected": "armed_away"
+    },
+    {
+      "name": "second area takes the second code",
+      "useraccess": [1, 5],
+      "alarms": [],
+      "index": 1,
+      "expected": "armed_home"
+    },
+    {
+      "name": "index past the table",
+      "useraccess": [2],
+      "alarms": [],
+      "index": 1,
+      "expected": "unknown"
+    },
+    {
+      "name": "empty table",
+      "useraccess": [],
+      "alarms": [],
+      "index": 0,
+      "expected": "unknown"
+    }
+  ]
+}

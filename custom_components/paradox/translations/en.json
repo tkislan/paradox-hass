@@ -39,5 +39,10 @@
       "already_in_progress": "This is already being configured. Finish the existing configuration before starting again.",
       "reauth_successful": "Re-authentication was successful"
     }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "The panel did not accept the command for {area}: {reason}."
+    }
   }
 }
