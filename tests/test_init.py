@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Final
 from unittest.mock import AsyncMock, patch
 
@@ -16,23 +15,19 @@ from homeassistant.core import Event, callback
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
-    async_fire_time_changed,
-)
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.paradox.const import DOMAIN
 from tests.fake_panel import (
     FakePanel,
     FakeResponse,
-    Hang,
     PanelRequest,
     PanelResult,
     Reset,
     render_index_page,
     render_login_page,
 )
-from tests.helpers import entity_id_for, setup_entry, tick
+from tests.helpers import advance, entity_id_for, hang_once, setup_entry, tick
 from tests.logs import problem_records
 
 if TYPE_CHECKING:
@@ -81,32 +76,6 @@ def problems(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
 def tracebacks(caplog: pytest.LogCaptureFixture) -> list[str]:
     """List the problems logged with a traceback, which are the unexpected ones."""
     return [r.getMessage() for r in problems(caplog) if r.exc_info]
-
-
-async def advance(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory, seconds: int
-) -> None:
-    """
-    Move the clock on like ``tick``, without waiting for background tasks.
-
-    A request the panel hangs keeps a background task from ever finishing, and
-    ``tick`` would wait for it.
-    """
-    for _ in range(seconds):
-        freezer.tick(timedelta(seconds=1))
-        async_fire_time_changed(hass)
-        await hass.async_block_till_done()
-
-
-def hang_once(panel: FakePanel, path: str) -> asyncio.Event:
-    arrived = asyncio.Event()
-
-    def hang(_request: PanelRequest) -> PanelResult:
-        arrived.set()
-        return Hang()
-
-    panel.respond_with(path, hang, times=1)
-    return arrived
 
 
 def record_state_writes(hass: HomeAssistant) -> list[Event]:
@@ -297,19 +266,12 @@ async def test_keep_alive_still_running_when_the_next_is_due_starts_no_second_re
     assert len(panel.requests_to("/keep_alive.html")) == 2
 
 
-@pytest.mark.parametrize(
-    "failure",
-    [FakeResponse(status=500, body="error"), Reset()],
-    ids=["http 500", "reset"],
-)
 async def test_failed_poll_makes_zones_unavailable_until_the_next_good_poll(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     panel: FakePanel,
     mock_config_entry: MockConfigEntry,
     caplog: pytest.LogCaptureFixture,
-    *,
-    failure: PanelResult,
 ) -> None:
     panel.set_status(statuszone=SLOT_0_OPEN)
     await setup_entry(hass, mock_config_entry)
@@ -317,7 +279,7 @@ async def test_failed_poll_makes_zones_unavailable_until_the_next_good_poll(
     assert zone_states(hass) == restored
     seen_at_setup = len(panel.requests)
 
-    panel.respond_with("/statuslive.html", failure)
+    panel.respond_with("/statuslive.html", Reset())
     await tick(hass, freezer)
 
     assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "unavailable")

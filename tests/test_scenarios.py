@@ -3,9 +3,11 @@ import re
 from typing import TYPE_CHECKING, Any, Final
 
 import pytest
+from homeassistant.util import dt as dt_util
 
+from tests.fake_panel import FakeResponse
 from tests.scenarios import play, scenario_rows
-from tests.spec_tables import load_spec
+from tests.spec_tables import load_spec, spec_text
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -14,7 +16,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-    from tests.fake_panel import FakePanel
+    from tests.fake_panel import FakePanel, PanelRequest, PanelResult
     from tests.scenarios import Row
 
 SCENARIOS: Final = scenario_rows(load_spec("ha_scenarios"))
@@ -81,6 +83,7 @@ VALID_ROW: Final = {
             "panel_status": {"useraccess": [1, 0]},
             "panel_fault": {"path": "/keep_alive.html", "kind": "page", "page": ""},
             "action": {"service": "alarm_disarm", "area": 0},
+            "wall_clock_step_s": -120,
             "expect": {},
         }
     ],
@@ -89,7 +92,14 @@ ROW_AT: Final = "ha_scenarios.json, row 'startup/row'"
 
 
 def valid_spec() -> dict[str, Any]:
-    groups = ("keep_alive", "armed", "sensors", "commands", "setup_failures")
+    groups = (
+        "keep_alive",
+        "armed",
+        "sensors",
+        "commands",
+        "setup_failures",
+        "recovery",
+    )
     return {
         "_comment": "",
         "login": {},
@@ -117,7 +127,15 @@ async def test_scenario(
 
 
 def test_rows_of_every_group_are_loaded_with_group_and_name_as_id() -> None:
-    groups = ("startup", "keep_alive", "armed", "sensors", "commands", "setup_failures")
+    groups = (
+        "startup",
+        "keep_alive",
+        "armed",
+        "sensors",
+        "commands",
+        "setup_failures",
+        "recovery",
+    )
     spec = valid_spec() | {group: [copy.deepcopy(VALID_ROW)] for group in groups}
 
     ids = [param.id for param in scenario_rows(spec)]
@@ -129,6 +147,7 @@ def test_rows_of_every_group_are_loaded_with_group_and_name_as_id() -> None:
         "sensors/row",
         "commands/row",
         "setup_failures/row",
+        "recovery/row",
     ]
 
 
@@ -292,6 +311,85 @@ async def test_a_panel_down_step_resets_every_request_until_the_panel_is_up(
     }
 
     await play(hass, freezer, panel, mock_config_entry, login=LOGIN, row=row)
+
+
+def seconds_ahead_at_polls(panel: FakePanel) -> list[float]:
+    """
+    Return a list that fills with the seconds ``dt_util.utcnow`` is ahead per request.
+
+    A request is any one for ``/statuslive.html``, the arm command's included.
+    """
+    unshifted = dt_util.utcnow
+    seen: list[float] = []
+
+    def respond(_request: PanelRequest) -> PanelResult:
+        seen.append((dt_util.utcnow() - unshifted()).total_seconds())
+        return FakeResponse(body=spec_text({"file": "data/unarmed.html"}))
+
+    panel.respond_with("/statuslive.html", respond)
+    return seen
+
+
+async def test_wall_clock_steps_shift_utcnow_and_add_up_over_steps(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    original = dt_util.utcnow
+    seen = seconds_ahead_at_polls(panel)
+    row = {
+        "setup": {"expect": {"panel_requests": SETUP_REQUESTS}},
+        "steps": [
+            {
+                "wall_clock_step_s": -120,
+                "advance_s": 1,
+                "expect": {"panel_requests": [STATUS]},
+            },
+            {
+                "action": {"service": "alarm_arm_away", "area": 0},
+                "wall_clock_step_s": 3600,
+                "advance_s": 1,
+                "expect": {"panel_requests": [ARM, STATUS, STATUS]},
+            },
+            {
+                "advance_s": 1,
+                "expect": {"panel_requests_any_order": [STATUS, KEEP_ALIVE]},
+            },
+        ],
+    }
+
+    await play(hass, freezer, panel, mock_config_entry, login=LOGIN, row=row)
+
+    # Setup, step 1; the action's request and its poll, then step 2's tick; step 3.
+    assert seen == [0, -120, -120, -120, 3480, 3480]
+    assert dt_util.utcnow is original
+
+
+async def test_the_wall_clock_is_back_when_a_step_check_fails(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    original = dt_util.utcnow
+    seen = seconds_ahead_at_polls(panel)
+    row = {
+        "setup": {"expect": {"panel_requests": SETUP_REQUESTS}},
+        "steps": [
+            {
+                "wall_clock_step_s": 3600,
+                "advance_s": 1,
+                "expect": {"panel_requests": []},
+            }
+        ],
+    }
+
+    with pytest.raises(AssertionError, match=r"^in step 1\n"):
+        await play(hass, freezer, panel, mock_config_entry, login=LOGIN, row=row)
+
+    assert seen == [0, 3600]
+    assert dt_util.utcnow is original
 
 
 async def test_a_default_page_answers_accepted_credentials(

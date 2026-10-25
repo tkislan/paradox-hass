@@ -1,5 +1,5 @@
 {
-  "_comment": "Home Assistant versions of the whole-system timelines of the bridge (tests/spec/system_scenarios.json of tkislan/paradox), played by tests/scenarios.py against the integration and the fake panel of tests/fake_panel.py. Written in this repository, not copied from the bridge. Top level: _comment, login, and the groups startup, keep_alive, armed, sensors, commands and setup_failures, each a list of rows. Each row is one scenario: the config entry is set up, then 'steps' are played in order. 'login' is copied from the bridge file: the config entry logs in with username and password, and the panel hands out session and accepts u and p for it. Before a row's panel keys apply, the panel has require_login on, the six default zones Predsien, Lava izba, Prava izba, Spalna, Obyvacka, Chodba, a statuszone of 32 zeros, useraccess [1, 0] and no alarms or troubles. Row keys: name, ported_from (the bridge row it ports, as '<bridge group>/<bridge row name>'), note? (how the port differs from the bridge row), panel?, setup, steps?. panel: zones ([area bitmask, name] pairs, padded to 32 slots with unused [0, ' ']), statuszone and useraccess (lists of zone status and area state codes), alarms and troubles (lists of index strings, which the panel writes quoted), accept_login (false: no login is accepted), default_page (the page that answers accepted credentials, an inline string or {file: path relative to tests/}; the captured default page when omitted), down (true: every request is answered with a reset connection), faults (a list of faults, active from the start). A fault is {path, kind, times?}: the next 'times' requests for path (whatever their query), all of them when times is omitted, fail as kind: http_500 (HTTP 500), reset (connection closed before any response), hang (never answered; rejected when the file is loaded, as neither the setup nor a step moves the clock on while the panel holds a request), login_page (status 200 with the login page), garbage (status 200 with a page that has neither a session value nor status tables), wrong_title (status 200 with a page titled 'Other'), or page ({path, kind: 'page', page, times?}: status 200 with 'page', an inline string or {file}). aiohttp sends a GET again, once, when its connection is closed before any response, so every reset request reaches the panel twice: a fault that resets N requests of the integration has times 2N, and the request lists hold each of them twice. setup is {advance_s?, expect}: the config entry is set up; with advance_s, the setup runs while the clock moves on that many seconds, and must be over by then. Step keys, applied in this order: panel_status ({statuszone?, useraccess?, alarms?, troubles?} the panel serves from now on), panel_zones (the zones the index page serves from now on), panel_fault (a fault), panel_expire_session (true: the panel drops the session), panel_down (the panel's down from now on), action ({service, area}: the alarm_control_panel service alarm_arm_away, alarm_arm_home, alarm_arm_night or alarm_disarm, called on the entity of the 0-based area and waited for), advance_s (the clock moves on this many seconds, one at a time, and each time every timer due within the next half second runs). expect describes the end of the setup or of a step and what happened during it: entry_state (loaded, setup_retry or setup_error), reauth_in_progress (whether a reauth flow for the entry is open), action_error (the translation key of the error the action raised), panel_requests (every request line the panel received, in order, as 'GET <path?query>'), panel_requests_any_order (the same, compared as a multiset, for timers due in the same second), panel_request_counts ({request line: count} of every request line received, for long stretches of time), states ({'zone_<slot>' | 'area_<index>': state}: the state of the entity whose unique ID ends that way, or 'absent' when there is none; entities left out are not checked). entry_state, reauth_in_progress and states are checked only when given. An expect has at most one of panel_requests, panel_requests_any_order and panel_request_counts; with none of them, no request is expected, and an absent action_error means that the action raised nothing. The integration's timing: the setup logs in and polls GET /statuslive.html once before any entity exists; after it, a poll follows every second and GET /keep_alive.html?msgid=1 every 3 seconds, counted from the end of the setup; an accepted action polls at once; a failed setup ends with GET /logout.html, after the client's own logout when the index page failed every attempt. Porting: the bridge's start becomes the setup, which also takes the bridge's first poll; advance_ms becomes advance_s, and the bridge's steps of 999 ms and 1 ms are joined into whole seconds; the armed topic becomes the state of area_0, and paradox/sensor/<slot> becomes zone_<slot>; a process exit becomes the entry state; failed commands become action_error; MQTT-only and log expectations and the requests a bridge row ignores are dropped.",
+  "_comment": "Home Assistant versions of the whole-system timelines of the bridge (tests/spec/system_scenarios.json of tkislan/paradox), played by tests/scenarios.py against the integration and the fake panel of tests/fake_panel.py. Written in this repository, not copied from the bridge. Top level: _comment, login, and the groups startup, keep_alive, armed, sensors, commands, setup_failures and recovery, each a list of rows. Each row is one scenario: the config entry is set up, then 'steps' are played in order. 'login' is copied from the bridge file: the config entry logs in with username and password, and the panel hands out session and accepts u and p for it. Before a row's panel keys apply, the panel has require_login on, the six default zones Predsien, Lava izba, Prava izba, Spalna, Obyvacka, Chodba, a statuszone of 32 zeros, useraccess [1, 0] and no alarms or troubles. Row keys: name, ported_from (the bridge row it ports, as '<bridge group>/<bridge row name>'), note? (how the port differs from the bridge row), panel?, setup, steps?. panel: zones ([area bitmask, name] pairs, padded to 32 slots with unused [0, ' ']), statuszone and useraccess (lists of zone status and area state codes), alarms and troubles (lists of index strings, which the panel writes quoted), accept_login (false: no login is accepted), default_page (the page that answers accepted credentials, an inline string or {file: path relative to tests/}; the captured default page when omitted), down (true: every request is answered with a reset connection), faults (a list of faults, active from the start). A fault is {path, kind, times?}: the next 'times' requests for path (whatever their query), all of them when times is omitted, fail as kind: http_500 (HTTP 500), reset (connection closed before any response), hang (never answered; rejected when the file is loaded, as neither the setup nor a step moves the clock on while the panel holds a request), login_page (status 200 with the login page), garbage (status 200 with a page that has neither a session value nor status tables), wrong_title (status 200 with a page titled 'Other'), or page ({path, kind: 'page', page, times?}: status 200 with 'page', an inline string or {file}). aiohttp sends a GET again, once, when its connection is closed before any response, so every reset request reaches the panel twice: a fault that resets N requests of the integration has times 2N, and the request lists hold each of them twice. setup is {advance_s?, expect}: the config entry is set up; with advance_s, the setup runs while the clock moves on that many seconds, and must be over by then. Step keys, applied in this order: panel_status ({statuszone?, useraccess?, alarms?, troubles?} the panel serves from now on), panel_zones (the zones the index page serves from now on), panel_fault (a fault), panel_expire_session (true: the panel drops the session), panel_down (the panel's down from now on), action ({service, area}: the alarm_control_panel service alarm_arm_away, alarm_arm_home, alarm_arm_night or alarm_disarm, called on the entity of the 0-based area and waited for), wall_clock_step_s (the wall clock Home Assistant code reads, dt_util.utcnow, moves by this many seconds, back when negative, for the rest of the row, and the seconds of several steps add up; time.monotonic() and the timers do not move), advance_s (the clock moves on this many seconds, one at a time, and each time every timer due within the next half second runs). expect describes the end of the setup or of a step and what happened during it: entry_state (loaded, setup_retry or setup_error), reauth_in_progress (whether a reauth flow for the entry is open), action_error (the translation key of the error the action raised), panel_requests (every request line the panel received, in order, as 'GET <path?query>'), panel_requests_any_order (the same, compared as a multiset, for timers due in the same second), panel_request_counts ({request line: count} of every request line received, for long stretches of time), states ({'zone_<slot>' | 'area_<index>': state}: the state of the entity whose unique ID ends that way, or 'absent' when there is none; entities left out are not checked). entry_state, reauth_in_progress and states are checked only when given. An expect has at most one of panel_requests, panel_requests_any_order and panel_request_counts; with none of them, no request is expected, and an absent action_error means that the action raised nothing. The integration's timing: the setup logs in and polls GET /statuslive.html once before any entity exists; after it, a poll follows every second and GET /keep_alive.html?msgid=1 every 3 seconds, counted from the end of the setup; an accepted action polls at once; a failed setup ends with GET /logout.html, after the client's own logout when the index page failed every attempt; a poll the panel answered with a failure (an HTTP error status, a page without the status tables, the login page of an expired session) logs in again at once, and polls it did not answer (a reset or refused connection, or no answer within 20 seconds) do so after 60 seconds of them, counted from the first, and the count starts again after the poll that reaches the 60 seconds and after any answered poll; no login starts within 60 seconds of the start of the last new login, the setup's login not counted, and a failed poll that would start one leaves the entities unavailable; the polls wait for a login that is still running, so a step can end while the new login waits for its next index page attempt, and the next step goes on with it; a login that reads another layout (other zones, zone names, area names or trouble names) reloads the entry, which restarts the keep-alive interval at the end of the new setup; after a successful new login the entities have their last states again at once. Porting: the bridge's start becomes the setup, which also takes the bridge's first poll; advance_ms becomes advance_s, and the bridge's steps of 999 ms and 1 ms are joined into whole seconds; wall_clock_step_ms becomes wall_clock_step_s (ms / 1000); the armed topic becomes the state of area_0, and paradox/sensor/<slot> becomes zone_<slot>; a process exit becomes the entry state; where the bridge exits after its start (a failed poll less than 60 seconds after a new login started, a new login that fails or is rejected), the entry stays loaded and the entities become unavailable, and the bridge's logout on exit is dropped: the failed poll sends no login, the failed login leaves no reauth flow, and the rejected login opens one and no poll follows; a bridge fault of kind hang cannot be played here and the loader rejects it: row 22 of the bridge's failures group (counted from 1) has no Home Assistant equivalent, and rows 27 and 28 are played by tests/test_recovery.py; failed commands become action_error; MQTT-only and log expectations and the requests a bridge row ignores are dropped.",
   "login": {"session": "91AC25D06A0C26BA", "username": "user", "password": "1234", "u": "EBA2095C", "p": "82016AC9BD9B087D6C393B19C756B255"},
   "startup": [
     {
@@ -405,6 +405,220 @@
       "note": "The bridge's steps of 999 ms, 1 ms and nine of 1000 ms, which expect one index page request per second, are joined into the setup's 10 s, so the row checks that the retries end within 10 s; the client's own tests pin the 1000 ms between them.",
       "panel": {"faults": [{"path": "/index.html", "kind": "http_500"}]},
       "setup": {"advance_s": 10, "expect": {"entry_state": "setup_retry", "reauth_in_progress": false, "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /logout.html", "GET /logout.html"], "states": {"area_0": "absent", "zone_0": "absent"}}}
+    }
+  ],
+  "recovery": [
+    {
+      "name": "a status poll answered with HTTP 500 is followed by a new login, and polling goes on",
+      "ported_from": "failures/a status poll answered with HTTP 500 is followed by a new login, and polling goes on",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}}
+      ]
+    },
+    {
+      "name": "a status poll with a reset connection makes the entities unavailable, and the next tick polls again and restores them",
+      "ported_from": "failures/a status poll with a reset connection is only logged, and the next tick polls again",
+      "note": "Where the bridge only logs the failed poll, the entities are unavailable until the next answered poll.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "reset", "times": 2}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /statuslive.html"], "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}}
+      ]
+    },
+    {
+      "name": "status polls with reset connections leave the entities unavailable for 60 s from the first of them; the next one is followed by a new login, and polling goes on",
+      "ported_from": "failures/status polls with reset connections are only logged for 60000 ms from the first of them; the next one is followed by a new login, and polling goes on",
+      "note": "The fault has times 122 for 61 polls, and the first step counts 120 status requests for its 60 polls. Where the bridge only logs the polls, the entities are unavailable until the new login.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "reset", "times": 122}, "advance_s": 60, "expect": {"panel_request_counts": {"GET /statuslive.html": 120, "GET /keep_alive.html?msgid=1": 20}, "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}}
+      ]
+    },
+    {
+      "name": "an answered poll ends a run of reset ones: the 60 s count starts again at the next reset poll",
+      "ported_from": "failures/an answered poll ends a run of reset ones: the 60000 ms count starts again at the next reset poll",
+      "note": "The faults have times 118 and 120 and the counts hold 118 and 120 status requests for 59 and 60 polls. The answered poll brings back the states from before the run.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "reset", "times": 118}, "advance_s": 59, "expect": {"panel_request_counts": {"GET /statuslive.html": 118, "GET /keep_alive.html?msgid=1": 19}, "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "reset", "times": 120}, "advance_s": 60, "expect": {"panel_request_counts": {"GET /statuslive.html": 120, "GET /keep_alive.html?msgid=1": 20}, "states": {"area_0": "unavailable", "zone_0": "unavailable"}}}
+      ]
+    },
+    {
+      "name": "a poll answered with HTTP 500 during a run of reset ones is followed by a new login at once, and the 60 s count starts again after it",
+      "ported_from": "failures/a poll answered with HTTP 500 during a run of reset ones is followed by a new login at once, and the 60000 ms count starts again after it",
+      "note": "The new login starts at 4 s. The bridge tells a run that went on counting from the first reset at 1 s from one that starts again at 5 s by an exit at 61 s, and here the poll at 61 s leaves the entities unavailable without a login either way. The step added at 65 s tells them apart: counted from the reset poll at 5 s it is 60 s, so a new login follows; a count restarted later would send none.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "reset", "times": 6}, "advance_s": 3, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /statuslive.html", "GET /statuslive.html", "GET /statuslive.html", "GET /statuslive.html", "GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "reset", "times": 120}, "advance_s": 60, "expect": {"panel_request_counts": {"GET /statuslive.html": 120, "GET /keep_alive.html?msgid=1": 20}, "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "reset", "times": 2}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}}
+      ]
+    },
+    {
+      "name": "the wall clock set back 120 s during a run of reset polls after a new login: they still only make entities unavailable for 60 s from the first of them, and the next one is followed by another new login",
+      "ported_from": "failures/the wall clock set back 120000 ms during a run of reset polls after a new login: they are still only logged for 60000 ms from the first of them, and the next one is followed by another new login, not an exit",
+      "note": "The fault resets the bridge's 61 polls with times 122, and each step of 30 s holds 60 status requests, not 30. The 30 polls of a step hold 10 keep-alives, at 3 ... 30 s and 33 ... 60 s counted from the end of the setup.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "reset", "times": 122}, "advance_s": 30, "expect": {"panel_request_counts": {"GET /statuslive.html": 60, "GET /keep_alive.html?msgid=1": 10}, "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"wall_clock_step_s": -120, "advance_s": 30, "expect": {"panel_request_counts": {"GET /statuslive.html": 60, "GET /keep_alive.html?msgid=1": 10}, "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+        {"advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed", "zone_0": "off"}}}
+      ]
+    },
+    {
+      "name": "the wall clock set forward an hour during a run of reset polls: they still only make entities unavailable for 60 s from the first of them",
+      "ported_from": "failures/the wall clock set forward an hour during a run of reset polls: they are still only logged for 60000 ms from the first of them",
+      "note": "The fault resets the bridge's 61 polls with times 122, and the steps of 4 s and 56 s hold 8 and 112 status requests, not 4 and 56. Their keep-alives, counted from the end of the setup, are at 3 s and at 6 ... 60 s (19).",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "reset", "times": 122}, "advance_s": 4, "expect": {"panel_request_counts": {"GET /statuslive.html": 8, "GET /keep_alive.html?msgid=1": 1}, "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"wall_clock_step_s": 3600, "advance_s": 56, "expect": {"panel_request_counts": {"GET /statuslive.html": 112, "GET /keep_alive.html?msgid=1": 19}, "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}}
+      ]
+    },
+    {
+      "name": "a status poll answered with a page without the status tables is followed by a new login, and polling goes on",
+      "ported_from": "failures/a status poll answered with a page without the status tables is followed by a new login, and polling goes on",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "garbage", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "an expired panel session fails the next poll, and the new login after it makes the polls update the states again",
+      "ported_from": "failures/an expired panel session fails the next poll, and the new login after it makes the polls publish again",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+        {"panel_expire_session": true, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed"}}},
+        {"panel_status": {"useraccess": [2, 0]}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "armed_away"}}}
+      ]
+    },
+    {
+      "name": "the new login after a failed poll reads the zones again: a slot taken into use gets an entity, one no longer in use loses its entity, and a zone in use before and after keeps its state",
+      "ported_from": "failures/the new login after a failed poll reads the zones again: a slot taken into use publishes, one no longer in use does not, and a zone in use before and after keeps its state",
+      "note": "The zones change the layout, so the entry reloads inside the step: its requests are the failed poll, the new login, the reload's logout and the new setup's login and poll, in any order. The reload restarts the keep-alive interval at the end of the new setup, 2 s, so step 3 holds no keep-alive, which the bridge row has at 3 s.",
+      "panel": {"zones": [[1, "A"], [1, "B"]]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "absent"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "off", "zone_2": "absent"}}},
+        {"panel_zones": [[1, "A"], [0, " "], [1, "C"]], "panel_expire_session": true, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /logout.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "absent", "zone_2": "off"}}},
+        {"panel_status": {"statuszone": [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "absent", "zone_2": "on"}}}
+      ]
+    },
+    {
+      "name": "after many good polls, the first failed one is followed by a new login",
+      "ported_from": "failures/after many good polls, the first failed one is followed by a new login",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}}
+      ]
+    },
+    {
+      "name": "a panel that went away: 60 s of unanswered polls bring no new login, then the new login fails and the entry stays loaded without reauth",
+      "ported_from": "failures/a panel that went away: 60000 ms of refused polls bring no new login and no exit, then the new login fails and the bridge exits with code 1",
+      "note": "The fake panel resets every connection where the bridge's panel refuses it, so it records every request, twice: the 60 polls of the first step are 120 requests, and its 20 keep-alives (every 3 s from the end of the setup, from 3 s to 60 s) are 40. The new login of the second step stops at the login page, so its requests are the poll, the logout and the login page, each twice.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"panel_down": true, "advance_s": 60, "expect": {"panel_request_counts": {"GET /statuslive.html": 120, "GET /keep_alive.html?msgid=1": 40}, "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"advance_s": 1, "expect": {"entry_state": "loaded", "reauth_in_progress": false, "panel_requests": ["GET /statuslive.html", "GET /statuslive.html", "GET /logout.html", "GET /logout.html", "GET /login_page.html", "GET /login_page.html"], "states": {"area_0": "unavailable", "zone_0": "unavailable"}}}
+      ]
+    },
+    {
+      "name": "a new login rejected by the panel after a failed poll starts reauth, leaves the entities unavailable and stops the polls",
+      "ported_from": "failures/a new login rejected by the panel after a failed poll exits with code 1",
+      "note": "The second step is added: it shows that no poll follows the rejected login, as the poll due at 2 s is not sent. The entry stays loaded while the reauth flow is open.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"panel_fault": {"path": "/default.html", "kind": "wrong_title"}, "panel_expire_session": true, "advance_s": 1, "expect": {"reauth_in_progress": true, "panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255"], "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"advance_s": 1, "expect": {"reauth_in_progress": true, "states": {"area_0": "unavailable", "zone_0": "unavailable"}}}
+      ]
+    },
+    {
+      "name": "no poll is sent while the new login is pending, and the first tick after it polls again",
+      "ported_from": "failures/no poll is sent while the new login is pending, and the first tick after it polls again",
+      "note": "The new login waits 1 s between index page attempts, so it is pending from 1 s to 4 s. No poll is due while it runs: it ends at 4 s with the fourth index page attempt, and the next poll goes out 1 s later. The fault on the index page comes in a step of its own, as the setup's login would use it up.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"panel_fault": {"path": "/index.html", "kind": "http_500", "times": 3}, "expect": {}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /index.html"]}},
+        {"advance_s": 1, "expect": {"panel_requests_any_order": ["GET /keep_alive.html?msgid=1", "GET /index.html"]}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /index.html"]}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}}
+      ]
+    },
+    {
+      "name": "after a failed poll that a new login did not fix, the entities become unavailable, no logout follows and the polls go on",
+      "ported_from": "failures/after a failed poll that a new login did not fix, the bridge logs out, stops polling and exits with code 1",
+      "note": "The bridge stops polling after that and its last step expects nothing; here the polls go on, so the last step covers the keep-alive due at 3 s and the polls due at 3 s to 5 s, the first of which restores the states.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed", "zone_0": "off"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "unavailable", "zone_0": "unavailable"}}},
+        {"advance_s": 3, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /statuslive.html", "GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed", "zone_0": "off"}}}
+      ]
+    },
+    {
+      "name": "a poll failing again 59 s after the new login started leaves the entities unavailable and sends no login",
+      "ported_from": "failures/a poll failing again 59000 ms after the new login started exits with code 1",
+      "note": "The failed poll shares its second with a keep-alive. The 58 s step holds the polls of seconds 2 to 59 and the keep-alives of seconds 3 to 57.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 58, "expect": {"panel_request_counts": {"GET /statuslive.html": 58, "GET /keep_alive.html?msgid=1": 19}, "states": {"area_0": "disarmed"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "unavailable"}}}
+      ]
+    },
+    {
+      "name": "a poll failing again 60 s after the new login started is followed by another new login",
+      "ported_from": "failures/a poll failing again 60000 ms after the new login started is followed by another new login",
+      "note": "The 59 s step holds the polls of seconds 2 to 60 and the keep-alives of seconds 3 to 60.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 59, "expect": {"panel_request_counts": {"GET /statuslive.html": 59, "GET /keep_alive.html?msgid=1": 20}, "states": {"area_0": "disarmed"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "the 60 s count starts again at every new login: a poll failing 1 s after the second one leaves the entities unavailable and sends no login",
+      "ported_from": "failures/the 60000 ms count starts again at every new login: a poll failing 1000 ms after the second one exits with code 1",
+      "note": "The 59 s step holds the polls of seconds 2 to 60 and the keep-alives of seconds 3 to 60.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 59, "expect": {"panel_request_counts": {"GET /statuslive.html": 59, "GET /keep_alive.html?msgid=1": 20}, "states": {"area_0": "disarmed"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "unavailable"}}}
+      ]
+    },
+    {
+      "name": "the 60 s count from the start of the new login: a poll failing 60 s after it started and 59 s after it ended is followed by another one",
+      "ported_from": "failures/the 60000 ms count from the start of the new login: a poll failing 60000 ms after it started and 59000 ms after it ended is followed by another one",
+      "note": "The index page fails once, so the new login started at 1 s ends at 2 s, and polls wait for it; the first poll after it is the one at 3 s. The 58 s step holds 58 polls (seconds 3 to 60) and 20 keep-alives (seconds 3, 6, up to 60).",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_fault": {"path": "/index.html", "kind": "http_500", "times": 1}, "expect": {}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /index.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 58, "expect": {"panel_request_counts": {"GET /statuslive.html": 58, "GET /keep_alive.html?msgid=1": 20}, "states": {"area_0": "disarmed"}}},
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html"], "states": {"area_0": "disarmed"}}}
+      ]
     }
   ]
 }

@@ -2,14 +2,19 @@
 
 import asyncio
 from collections import Counter
+from contextlib import contextmanager
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Final
+from unittest.mock import patch
 
 import pytest
 from homeassistant.config_entries import SOURCE_REAUTH
 from homeassistant.const import Platform
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 from homeassistant.util.async_ import get_scheduled_timer_handles
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.paradox.const import DOMAIN
 from tests.fake_panel import fault_result
@@ -17,7 +22,7 @@ from tests.helpers import entity_id_for, tick
 from tests.spec_tables import spec_text
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Iterator, Mapping
     from collections.abc import Set as AbstractSet
 
     from _pytest.mark import ParameterSet
@@ -36,6 +41,7 @@ GROUPS: Final = (
     "sensors",
     "commands",
     "setup_failures",
+    "recovery",
 )
 FILE_KEYS: Final = {"_comment", "login", *GROUPS}
 ROW_KEYS: Final = {"name", "ported_from", "note", "panel", "setup", "steps"}
@@ -59,6 +65,7 @@ STEP_KEYS: Final = {
     "panel_expire_session",
     "panel_down",
     "action",
+    "wall_clock_step_s",
     "advance_s",
     "expect",
 }
@@ -191,6 +198,26 @@ async def _settle(task: asyncio.Task[Any]) -> None:
     raise AssertionError("The setup neither ended nor waited for the clock")
 
 
+async def _tick(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, seconds: int
+) -> None:
+    """Move the clock on like ``tick``, not waiting for tasks asleep on the clock."""
+    for _ in range(seconds):
+        freezer.tick(timedelta(seconds=1))
+        async_fire_time_changed(hass)
+        for _ in range(SETTLE_ROUNDS):
+            await hass.async_block_till_done()
+            # A new login parked between two index page attempts is such a task, and
+            # ``tick`` would wait for it forever.
+            if all(
+                task.done() or _waits_for_the_clock(task)
+                for task in hass._background_tasks
+            ):
+                break
+        else:
+            raise AssertionError("The tasks neither ended nor waited for the clock")
+
+
 async def _set_up(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
@@ -237,12 +264,30 @@ async def _act(
     return None
 
 
+@contextmanager
+def _wall_clock() -> Iterator[Callable[[int], None]]:
+    """Yield a function that moves ``dt_util.utcnow`` on by the seconds it is given."""
+    # Only utcnow is patched: async_fire_time_changed compares timer deadlines with
+    # time.time(), which must not move.
+    utcnow = dt_util.utcnow
+    shift = timedelta()
+
+    def step(seconds: int) -> None:
+        nonlocal shift
+        shift += timedelta(seconds=seconds)
+
+    with patch.object(dt_util, "utcnow", lambda: utcnow() + shift):
+        yield step
+
+
 async def _play_step(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     panel: FakePanel,
     entry: MockConfigEntry,
     step: Row,
+    *,
+    step_wall_clock: Callable[[int], None],
 ) -> str | None:
     if "panel_status" in step:
         panel.set_status(**step["panel_status"])
@@ -255,8 +300,10 @@ async def _play_step(
     if "panel_down" in step:
         panel.down = step["panel_down"]
     error = await _act(hass, entry, step["action"]) if "action" in step else None
+    if "wall_clock_step_s" in step:
+        step_wall_clock(step["wall_clock_step_s"])
     if "advance_s" in step:
-        await tick(hass, freezer, step["advance_s"])
+        await _tick(hass, freezer, step["advance_s"])
     return error
 
 
@@ -331,11 +378,19 @@ async def play(
     requests = panel.request_lines[seen:]
     _check("setup", hass, entry, setup["expect"], requests=requests, action_error=None)
 
-    for number, step in enumerate(row.get("steps", []), 1):
-        seen = len(panel.requests)
-        error = await _play_step(hass, freezer, panel, entry, step)
-        requests = panel.request_lines[seen:]
-        expect = step.get("expect", {})
-        _check(
-            f"step {number}", hass, entry, expect, requests=requests, action_error=error
-        )
+    with _wall_clock() as step_wall_clock:
+        for number, step in enumerate(row.get("steps", []), 1):
+            seen = len(panel.requests)
+            error = await _play_step(
+                hass, freezer, panel, entry, step, step_wall_clock=step_wall_clock
+            )
+            requests = panel.request_lines[seen:]
+            expect = step.get("expect", {})
+            _check(
+                f"step {number}",
+                hass,
+                entry,
+                expect,
+                requests=requests,
+                action_error=error,
+            )
