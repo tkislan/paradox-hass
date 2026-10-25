@@ -111,6 +111,6 @@ class ParadoxAreaPanel(ParadoxEntity, AlarmControlPanelEntity):
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="command_failed",
-                translation_placeholders={"area": str(self.name)},
+                translation_placeholders={"area": str(self.name), "reason": str(err)},
             ) from err
         await self.coordinator.async_request_refresh()

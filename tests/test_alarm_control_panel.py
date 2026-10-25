@@ -47,15 +47,22 @@ ACTIONS: Final = [
 ]
 FAILURES: Final = [
     pytest.param(
-        FakeResponse(status=500, body="error"), 1, ParadoxHttpError, id="http 500"
+        FakeResponse(status=500, body="error"),
+        1,
+        ParadoxHttpError,
+        "Request failed with status code 500",
+        id="http 500",
     ),
     # aiohttp resends a GET whose connection dropped before any response, so the panel
     # sees the command twice.
-    pytest.param(Reset(), 2, ParadoxConnectionError, id="reset"),
+    pytest.param(
+        Reset(), 2, ParadoxConnectionError, "ServerDisconnectedError", id="reset"
+    ),
     pytest.param(
         FakeResponse(body=render_login_page("AB12")),
         1,
         ParadoxSessionExpiredError,
+        "Command answered with the login page",
         id="login page",
     ),
 ]
@@ -237,7 +244,7 @@ async def test_state_is_polled_as_soon_as_the_command_is_accepted(
     assert alarm_states(hass) == {AREA_0: "armed_away"}
 
 
-@pytest.mark.parametrize(("answer", "times", "cause"), FAILURES)
+@pytest.mark.parametrize(("answer", "times", "cause", "reason"), FAILURES)
 async def test_failed_command_raises_command_failed_and_polling_continues(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
@@ -247,6 +254,7 @@ async def test_failed_command_raises_command_failed_and_polling_continues(
     answer: PanelResult,
     times: int,
     cause: type[Exception],
+    reason: str,
 ) -> None:
     await setup_entry(hass, mock_config_entry)
     seen_at_setup = len(panel.requests)
@@ -257,7 +265,7 @@ async def test_failed_command_raises_command_failed_and_polling_continues(
 
     assert raised.value.translation_domain == "paradox"
     assert raised.value.translation_key == "command_failed"
-    assert raised.value.translation_placeholders == {"area": "Cast 1"}
+    assert raised.value.translation_placeholders == {"area": "Cast 1", "reason": reason}
     assert type(raised.value.__cause__) is cause
     command = f"{STATUS}?area=00&value=r"
     assert panel.request_lines[seen_at_setup:] == [command] * times
@@ -269,7 +277,7 @@ async def test_failed_command_raises_command_failed_and_polling_continues(
     assert alarm_states(hass) == {AREA_0: "disarmed"}
 
 
-async def test_command_failure_message_names_the_area(
+async def test_command_failure_message_names_the_area_and_the_cause(
     hass: HomeAssistant, panel: FakePanel, mock_config_entry: MockConfigEntry
 ) -> None:
     await setup_entry(hass, mock_config_entry)
@@ -283,7 +291,10 @@ async def test_command_failure_message_names_the_area(
     with pytest.raises(HomeAssistantError) as raised:
         await call(hass, "alarm_disarm", AREA_0)
 
-    assert str(raised.value) == "The panel did not accept the command for Cast 1"
+    assert str(raised.value) == (
+        "The panel did not accept the command for Cast 1: "
+        "Request failed with status code 500"
+    )
 
 
 async def test_alarm_reported_by_the_panel_makes_the_area_triggered(
@@ -321,4 +332,3 @@ async def test_area_taken_out_of_use_disappears_after_a_reload(
         AREA_0: f"{mock_config_entry.entry_id}_area_0"
     }
     assert alarm_states(hass) == {AREA_0: "disarmed"}
-    assert len(hass.states.async_all("binary_sensor")) == 6

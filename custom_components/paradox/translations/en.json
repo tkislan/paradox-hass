@@ -42,7 +42,7 @@
   },
   "exceptions": {
     "command_failed": {
-      "message": "The panel did not accept the command for {area}."
+      "message": "The panel did not accept the command for {area}: {reason}."
     }
   }
 }
