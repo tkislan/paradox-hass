@@ -14,6 +14,9 @@ if TYPE_CHECKING:
 
     from pytest_aiohttp.plugin import AiohttpServer
 
+# Before tests.scenarios is first imported, so that its checks report a diff.
+pytest.register_assert_rewrite("tests.scenarios")
+
 GOLDEN_NAME = "sample session, 4 digit code"
 
 
