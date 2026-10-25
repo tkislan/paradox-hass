@@ -1,6 +1,6 @@
 # Spec tables and captured pages
 
-Copies of the language-neutral case tables and captured panel pages of the Node.js bridge, [`tkislan/paradox`](https://github.com/tkislan/paradox), at commit `e6cb9b8297c1c7a270e441861fa1d8176175ff05`. Copies are never edited: a change belongs in the bridge, and the files are then copied again, byte for byte. `area_states.json` is the one exception: it is written in this repository, not copied, and may be edited here.
+Copies of the language-neutral case tables and captured panel pages of the Node.js bridge, [`tkislan/paradox`](https://github.com/tkislan/paradox), at commit `e6cb9b8297c1c7a270e441861fa1d8176175ff05`. Copies are never edited: a change belongs in the bridge, and the files are then copied again, byte for byte. `area_states.json` and `ha_scenarios.json` are the exceptions: they are written in this repository, not copied, and may be edited here.
 
 Copied from `tests/spec/` of the bridge into this directory:
 
@@ -13,6 +13,7 @@ Copied from `tests/spec/` of the bridge into this directory:
 Written in this repository, not in the bridge:
 
 - `area_states.json`
+- `ha_scenarios.json`: Home Assistant versions of rows of the bridge's `system_scenarios.json`
 
 Copied from `tests/data/` of the bridge into `tests/data/`; rows refer to them as `{"file": "data/<name>.html"}`, relative to `tests/`:
 
@@ -30,6 +31,6 @@ Left out:
 - `tests/data/login_url.txt` of the bridge: it holds a real host and hashed credentials.
 - The bridge's `system_scenarios.json`, `schemas.ts` and `crypto_reference.py`.
 
-`tests/test_status_timelines.py` replays the scenario groups of `status_machine.json` in Home Assistant; no test loads its `status_poll_cadence` group yet.
+`tests/test_status_timelines.py` replays the scenario groups of `status_machine.json` in Home Assistant; no test loads its `status_poll_cadence` group yet. `tests/test_scenarios.py` plays `ha_scenarios.json` with the interpreter in `tests/scenarios.py`.
 
-`tests/spec_tables.py` loads these files; a test that loads a group rejects any row of it with a key its format does not allow. The format of every row of a copied file is defined by `tests/spec/schemas.ts` of the bridge; `area_states.json` describes its own in its `_comment`.
+`tests/spec_tables.py` loads these files; a test that loads a group rejects any row of it with a key its format does not allow. The format of every row of a copied file is defined by `tests/spec/schemas.ts` of the bridge; `area_states.json` and `ha_scenarios.json` describe their own in their `_comment`.

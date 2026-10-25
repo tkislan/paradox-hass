@@ -7,12 +7,14 @@ import aiohttp
 import pytest
 from aiohttp import web
 
+from custom_components.paradox.panel.errors import ParadoxPageError
 from custom_components.paradox.panel.models import PanelStatus
 from custom_components.paradox.panel.pages import (
     is_login_page,
     parse_index_page,
     parse_session_value,
     parse_status_page,
+    parse_title,
 )
 from tests.fake_panel import (
     Cut,
@@ -22,7 +24,9 @@ from tests.fake_panel import (
     Hang,
     PanelRequest,
     PanelResult,
+    Reset,
     Stall,
+    fault_result,
     render_index_page,
 )
 from tests.logs import problem_records
@@ -391,6 +395,52 @@ def test_clear_overrides_restores_normal_answers() -> None:
 
     assert not is_login_page(body_of(get(panel, "/index.html")))
     assert body_of(get(panel, "/keep_alive.html")) == ""
+
+
+@pytest.mark.parametrize("target", ["/logout.html", "/index.html"])
+def test_a_down_panel_answers_every_request_with_a_reset(target: str) -> None:
+    panel = make_panel()
+    panel.respond_with("/index.html", FakeResponse(body="override"))
+    panel.down = True
+
+    assert isinstance(get(panel, target), Reset)
+
+
+@pytest.mark.parametrize(("kind", "result_type"), [("reset", Reset), ("hang", Hang)])
+def test_a_connection_fault_gives_its_result(
+    kind: str, result_type: type[PanelResult]
+) -> None:
+    assert isinstance(fault_result(kind, SESSION), result_type)
+
+
+def test_an_http_500_fault_answers_status_500() -> None:
+    assert response_of(fault_result("http_500", SESSION)).status == 500
+
+
+def test_a_login_page_fault_hands_out_the_session_value() -> None:
+    assert served_login_page(body_of(fault_result("login_page", SESSION)))
+
+
+def test_a_garbage_fault_has_neither_a_session_value_nor_status_tables() -> None:
+    body = body_of(fault_result("garbage", SESSION))
+
+    with pytest.raises(ParadoxPageError):
+        parse_session_value(body)
+    with pytest.raises(ParadoxPageError):
+        parse_status_page(body)
+
+
+def test_a_wrong_title_fault_is_a_page_titled_other() -> None:
+    assert parse_title(body_of(fault_result("wrong_title", SESSION))) == "Other"
+
+
+def test_a_page_fault_answers_its_page() -> None:
+    assert body_of(fault_result("page", SESSION, "<html>A</html>")) == "<html>A</html>"
+
+
+def test_an_unknown_fault_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Unknown fault 'nope'"):
+        fault_result("nope", SESSION)
 
 
 @pytest.fixture

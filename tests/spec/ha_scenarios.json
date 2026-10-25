@@ -1,0 +1,410 @@
+{
+  "_comment": "Home Assistant versions of the whole-system timelines of the bridge (tests/spec/system_scenarios.json of tkislan/paradox), played by tests/scenarios.py against the integration and the fake panel of tests/fake_panel.py. Written in this repository, not copied from the bridge. Top level: _comment, login, and the groups startup, keep_alive, armed, sensors, commands and setup_failures, each a list of rows. Each row is one scenario: the config entry is set up, then 'steps' are played in order. 'login' is copied from the bridge file: the config entry logs in with username and password, and the panel hands out session and accepts u and p for it. Before a row's panel keys apply, the panel has require_login on, the six default zones Predsien, Lava izba, Prava izba, Spalna, Obyvacka, Chodba, a statuszone of 32 zeros, useraccess [1, 0] and no alarms or troubles. Row keys: name, ported_from (the bridge row it ports, as '<bridge group>/<bridge row name>'), note? (how the port differs from the bridge row), panel?, setup, steps?. panel: zones ([area bitmask, name] pairs, padded to 32 slots with unused [0, ' ']), statuszone and useraccess (lists of zone status and area state codes), alarms and troubles (lists of index strings, which the panel writes quoted), accept_login (false: no login is accepted), default_page (the page that answers accepted credentials, an inline string or {file: path relative to tests/}; the captured default page when omitted), down (true: every request is answered with a reset connection), faults (a list of faults, active from the start). A fault is {path, kind, times?}: the next 'times' requests for path (whatever their query), all of them when times is omitted, fail as kind: http_500 (HTTP 500), reset (connection closed before any response), hang (never answered), login_page (status 200 with the login page), garbage (status 200 with a page that has neither a session value nor status tables), wrong_title (status 200 with a page titled 'Other'), or page ({path, kind: 'page', page, times?}: status 200 with 'page', an inline string or {file}). aiohttp sends a GET again, once, when its connection is closed before any response, so every reset request reaches the panel twice: a fault that resets N requests of the integration has times 2N, and the request lists hold each of them twice. setup is {advance_s?, expect}: the config entry is set up; with advance_s, the setup runs while the clock moves on that many seconds, and must be over by then. Step keys, applied in this order: panel_status ({statuszone?, useraccess?, alarms?, troubles?} the panel serves from now on), panel_zones (the zones the index page serves from now on), panel_fault (a fault), panel_expire_session (true: the panel drops the session), panel_down (the panel's down from now on), action ({service, area}: the alarm_control_panel service alarm_arm_away, alarm_arm_home, alarm_arm_night or alarm_disarm, called on the entity of the 0-based area and waited for), advance_s (the clock moves on this many seconds, one at a time, and each time every timer due within the next half second runs). expect describes the end of the setup or of a step and what happened during it: entry_state (loaded, setup_retry or setup_error), reauth_in_progress (whether a reauth flow for the entry is open), action_error (the translation key of the error the action raised), panel_requests (every request line the panel received, in order, as 'GET <path?query>'), panel_requests_any_order (the same, compared as a multiset, for timers due in the same second), panel_request_counts ({request line: count} of every request line received, for long stretches of time), states ({'zone_<slot>' | 'area_<index>': state}: the state of the entity whose unique ID ends that way, or 'absent' when there is none; entities left out are not checked). entry_state, reauth_in_progress and states are checked only when given. An expect has at most one of panel_requests, panel_requests_any_order and panel_request_counts; with none of them, no request is expected, and an absent action_error means that the action raised nothing. The integration's timing: the setup logs in and polls GET /statuslive.html once before any entity exists; after it, a poll follows every second and GET /keep_alive.html?msgid=1 every 3 seconds, counted from the end of the setup; an accepted action polls at once; a failed setup ends with GET /logout.html, after the client's own logout when the index page failed every attempt. Porting: the bridge's start becomes the setup, which also takes the bridge's first poll; advance_ms becomes advance_s, and the bridge's steps of 999 ms and 1 ms are joined into whole seconds; the armed topic becomes the state of area_0, and paradox/sensor/<slot> becomes zone_<slot>; a process exit becomes the entry state; failed commands become action_error; MQTT-only and log expectations and the requests a bridge row ignores are dropped.",
+  "login": {"session": "91AC25D06A0C26BA", "username": "user", "password": "1234", "u": "EBA2095C", "p": "82016AC9BD9B087D6C393B19C756B255"},
+  "startup": [
+    {
+      "name": "polls repeat once per second",
+      "ported_from": "startup/polls repeat once per second",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "a panel with no zone in use starts and still reports the armed state",
+      "ported_from": "startup/a panel with no zone in use starts and still reports the armed state",
+      "panel": {"zones": [], "statuszone": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "absent", "zone_1": "absent", "zone_2": "absent", "zone_3": "absent", "zone_4": "absent", "zone_5": "absent", "zone_6": "absent", "zone_7": "absent", "zone_8": "absent", "zone_9": "absent", "zone_10": "absent", "zone_11": "absent", "zone_12": "absent", "zone_13": "absent", "zone_14": "absent", "zone_15": "absent", "zone_16": "absent", "zone_17": "absent", "zone_18": "absent", "zone_19": "absent", "zone_20": "absent", "zone_21": "absent", "zone_22": "absent", "zone_23": "absent", "zone_24": "absent", "zone_25": "absent", "zone_26": "absent", "zone_27": "absent", "zone_28": "absent", "zone_29": "absent", "zone_30": "absent", "zone_31": "absent"}}},
+      "steps": [
+        {"panel_status": {"useraccess": [2, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "armed_away", "zone_0": "absent", "zone_1": "absent", "zone_2": "absent", "zone_3": "absent", "zone_4": "absent", "zone_5": "absent", "zone_6": "absent", "zone_7": "absent", "zone_8": "absent", "zone_9": "absent", "zone_10": "absent", "zone_11": "absent", "zone_12": "absent", "zone_13": "absent", "zone_14": "absent", "zone_15": "absent", "zone_16": "absent", "zone_17": "absent", "zone_18": "absent", "zone_19": "absent", "zone_20": "absent", "zone_21": "absent", "zone_22": "absent", "zone_23": "absent", "zone_24": "absent", "zone_25": "absent", "zone_26": "absent", "zone_27": "absent", "zone_28": "absent", "zone_29": "absent", "zone_30": "absent", "zone_31": "absent"}}}
+      ]
+    },
+    {
+      "name": "a failing logout before login is tolerated",
+      "ported_from": "startup/a failing logout before login is tolerated",
+      "panel": {"faults": [{"path": "/logout.html", "kind": "reset", "times": 2}]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+    },
+    {
+      "name": "index page failures are retried and the setup still succeeds",
+      "ported_from": "startup/index page failures are retried 1000 ms apart and startup still succeeds",
+      "note": "The bridge's steps of 999, 1, 1000 and 1000 ms, which expect one index page request per second, are joined into the setup's 3 s, so the row checks that the retries end within 3 s; the client's own tests pin the 1000 ms between them.",
+      "panel": {"faults": [{"path": "/index.html", "kind": "http_500", "times": 3}]},
+      "setup": {"advance_s": 3, "expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+    },
+    {
+      "name": "a successful login answered with a pretty-printed default page is recognised and the setup succeeds",
+      "ported_from": "startup/a successful login answered with a pretty-printed default page is recognised and startup succeeds",
+      "panel": {"default_page": {"file": "data/pretty_default_page.html"}},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+    },
+    {
+      "name": "with a zone name with a hyphen the setup succeeds and the zone is monitored",
+      "ported_from": "startup/a zone name with a hyphen starts the bridge and the zone is monitored",
+      "panel": {"zones": [[1, "Hall-way"]], "statuszone": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on"}}}
+    }
+  ],
+  "keep_alive": [
+    {
+      "name": "a keep-alive request GET /keep_alive.html?msgid=1 every 3 s",
+      "ported_from": "keep_alive/a keep-alive request GET /keep_alive.html?msgid=1 every 3000 ms",
+      "note": "The bridge's steps of 2999 ms and 1 ms become steps of 2 s and 1 s.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"advance_s": 2, "expect": {"panel_requests": ["GET /statuslive.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests_any_order": ["GET /keep_alive.html?msgid=1", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 3, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /statuslive.html", "GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "steady state: 30 s of an unchanged panel are 30 polls and 10 keep-alives, and the area is still disarmed",
+      "ported_from": "keep_alive/steady state: 30 s of an unchanged panel are 30 polls, 10 keep-alives and a single message",
+      "note": "The bridge's single message is the armed state of its first poll, which the setup takes here; how often Home Assistant writes a state is not checked.",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"advance_s": 30, "expect": {"panel_request_counts": {"GET /statuslive.html": 30, "GET /keep_alive.html?msgid=1": 10}, "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "a keep-alive answered with HTTP 500 is only logged",
+      "ported_from": "keep_alive/a keep-alive answered with HTTP 500 is only logged",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_fault": {"path": "/keep_alive.html", "kind": "http_500", "times": 1}, "advance_s": 3, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /statuslive.html", "GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "a keep-alive with a reset connection is only logged",
+      "ported_from": "keep_alive/a keep-alive with a reset connection is only logged",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_fault": {"path": "/keep_alive.html", "kind": "reset", "times": 2}, "advance_s": 3, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /statuslive.html", "GET /statuslive.html", "GET /keep_alive.html?msgid=1", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "a keep-alive answered with the login page is only logged",
+      "ported_from": "keep_alive/a keep-alive answered with the login page is only logged",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_fault": {"path": "/keep_alive.html", "kind": "login_page", "times": 1}, "advance_s": 3, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /statuslive.html", "GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+      ]
+    }
+  ],
+  "armed": [
+    {
+      "name": "armed panel: armed_away from the setup on, unchanged at the next poll",
+      "ported_from": "armed/armed panel: ON at the first poll, not repeated",
+      "note": "That the bridge does not repeat its message has no Home Assistant counterpart: how often Home Assistant writes a state is not checked.",
+      "panel": {"useraccess": [2, 0]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "armed_away"}}},
+      "steps": [
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "armed_away"}}}
+      ]
+    },
+    {
+      "name": "arming code 7 is arming",
+      "ported_from": "armed/arming code 7 counts as armed",
+      "note": "The bridge counts code 7 as armed (ON); Home Assistant has an arming state of its own for it.",
+      "panel": {"useraccess": [7, 0]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "arming"}}},
+      "steps": [
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "arming"}}}
+      ]
+    },
+    {
+      "name": "armed to disarmed",
+      "ported_from": "armed/armed to disarmed",
+      "panel": {"useraccess": [2, 0]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "armed_away"}}},
+      "steps": [
+        {"panel_status": {"useraccess": [1, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "disarmed to arming to armed_away to arming to disarmed: arming and armed_away are separate states",
+      "ported_from": "armed/disarmed to arming to armed to disarmed: arming and armed are one state",
+      "note": "The bridge publishes nothing while codes 7 and 2 alternate, as both are ON; Home Assistant changes state each time.",
+      "panel": {"useraccess": [1, 0]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_status": {"useraccess": [7, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "arming"}}},
+        {"panel_status": {"useraccess": [2, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "armed_away"}}},
+        {"panel_status": {"useraccess": [7, 0]}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "arming"}}},
+        {"panel_status": {"useraccess": [1, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "an empty useraccess table gives no area entity, also once the area is armed",
+      "ported_from": "armed/an empty useraccess table is an unknown state",
+      "note": "An area gets its entity only when it is in use at setup, so area_0 stays absent where the bridge publishes ON.",
+      "panel": {"useraccess": []},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "absent"}}},
+      "steps": [
+        {"panel_status": {"useraccess": [2, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "absent"}}}
+      ]
+    },
+    {
+      "name": "a useraccess table with a single entry is read as that entry",
+      "ported_from": "armed/a useraccess table with a single entry is read as that entry",
+      "panel": {"useraccess": [2]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "armed_away"}}},
+      "steps": [
+        {"panel_status": {"useraccess": [2, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "armed_away"}}}
+      ]
+    },
+    {
+      "name": "sleep, stay, entry delay and instant (4, 5, 6, 10) are armed_night, armed_home, pending and armed_home; ready and not ready (8, 9) are disarmed",
+      "ported_from": "armed/sleep, stay, entry delay and instant (4, 5, 6, 10) publish ON; ready and not ready (8, 9) publish OFF",
+      "panel": {"useraccess": [1, 0]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_status": {"useraccess": [4, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "armed_night"}}},
+        {"panel_status": {"useraccess": [8, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+        {"panel_status": {"useraccess": [5, 0]}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "armed_home"}}},
+        {"panel_status": {"useraccess": [9, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+        {"panel_status": {"useraccess": [6, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "pending"}}},
+        {"panel_status": {"useraccess": [1, 0]}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed"}}},
+        {"panel_status": {"useraccess": [10, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "armed_home"}}}
+      ]
+    },
+    {
+      "name": "an area in alarm is triggered, and back to its own state once the alarm clears",
+      "ported_from": "armed/areas in alarm and active troubles publish nothing, neither when they appear nor when they clear",
+      "note": "The bridge publishes nothing for an area in alarm; Home Assistant shows it as triggered. The troubles are still served with the alarm, but have no Home Assistant expectation yet.",
+      "panel": {"useraccess": [1, 0]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_status": {"alarms": ["0"], "troubles": ["16", "19", "38"]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "triggered"}}},
+        {"panel_status": {"alarms": [], "troubles": []}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+        {"panel_status": {"useraccess": [2, 0]}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "armed_away"}}}
+      ]
+    }
+  ],
+  "sensors": [
+    {
+      "name": "a sensor opening turns its own zone on and closing turns it off",
+      "ported_from": "sensors/a sensor opening publishes ON on its own topic and closing publishes OFF",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "on", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}},
+        {"panel_status": {"statuszone": [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "on", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}},
+        {"panel_status": {"statuszone": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}}
+      ]
+    },
+    {
+      "name": "closed codes 0, 3, 5, 7 and 8 close an open sensor, open code 9 keeps it open",
+      "ported_from": "sensors/closed codes 0, 3, 5, 7 and 8 close an open sensor, open code 9 keeps it open",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "on", "zone_2": "on", "zone_3": "on", "zone_4": "on", "zone_5": "on"}}},
+        {"panel_status": {"statuszone": [0, 3, 5, 3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}},
+        {"panel_status": {"statuszone": [1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "on", "zone_2": "on", "zone_3": "on", "zone_4": "on", "zone_5": "on"}}},
+        {"panel_status": {"statuszone": [7, 8, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "on", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}}
+      ]
+    },
+    {
+      "name": "one poll with several changes updates the area and every changed zone",
+      "ported_from": "sensors/one poll with several changes publishes the armed state first, then sensors by ascending index",
+      "note": "The order of the bridge's messages has no Home Assistant counterpart; the row checks the states after each poll.",
+      "panel": {"statuszone": [0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "useraccess": [2, 0]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "armed_away", "zone_0": "off", "zone_1": "on", "zone_2": "off", "zone_3": "on", "zone_4": "on", "zone_5": "off"}}},
+      "steps": [
+        {"panel_status": {"useraccess": [1, 0], "statuszone": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "on"}}}
+      ]
+    },
+    {
+      "name": "status entries of unused slots have no zone entity",
+      "ported_from": "sensors/status entries of unused slots are never published",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off", "zone_6": "absent", "zone_7": "absent", "zone_31": "absent"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off", "zone_6": "absent", "zone_7": "absent", "zone_31": "absent"}}}
+      ]
+    },
+    {
+      "name": "a sensor that opens and closes between two polls is never seen",
+      "ported_from": "sensors/a sensor that opens and closes between two polls is never seen",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "expect": {"states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}},
+        {"panel_status": {"statuszone": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}}
+      ]
+    },
+    {
+      "name": "a status table shorter than the zone list reads missing entries as closed",
+      "ported_from": "sensors/a status table shorter than the zone list reads missing entries as closed",
+      "panel": {"statuszone": [1, 1, 1]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "on", "zone_2": "on", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [1, 1]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "on", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}}
+      ]
+    },
+    {
+      "name": "a status table with a single entry is read as that entry",
+      "ported_from": "sensors/a status table with a single entry is read as that entry",
+      "panel": {"statuszone": [1]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [1, 1]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "on", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}}
+      ]
+    },
+    {
+      "name": "with no zone in use no zone entity ever exists",
+      "ported_from": "sensors/with no zone in use no sensor is ever published",
+      "panel": {"zones": []},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "absent", "zone_1": "absent", "zone_2": "absent", "zone_3": "absent", "zone_4": "absent", "zone_5": "absent", "zone_6": "absent", "zone_7": "absent", "zone_8": "absent", "zone_9": "absent", "zone_10": "absent", "zone_11": "absent", "zone_12": "absent", "zone_13": "absent", "zone_14": "absent", "zone_15": "absent", "zone_16": "absent", "zone_17": "absent", "zone_18": "absent", "zone_19": "absent", "zone_20": "absent", "zone_21": "absent", "zone_22": "absent", "zone_23": "absent", "zone_24": "absent", "zone_25": "absent", "zone_26": "absent", "zone_27": "absent", "zone_28": "absent", "zone_29": "absent", "zone_30": "absent", "zone_31": "absent"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "absent", "zone_1": "absent", "zone_2": "absent", "zone_3": "absent", "zone_4": "absent", "zone_5": "absent", "zone_6": "absent", "zone_7": "absent", "zone_8": "absent", "zone_9": "absent", "zone_10": "absent", "zone_11": "absent", "zone_12": "absent", "zone_13": "absent", "zone_14": "absent", "zone_15": "absent", "zone_16": "absent", "zone_17": "absent", "zone_18": "absent", "zone_19": "absent", "zone_20": "absent", "zone_21": "absent", "zone_22": "absent", "zone_23": "absent", "zone_24": "absent", "zone_25": "absent", "zone_26": "absent", "zone_27": "absent", "zone_28": "absent", "zone_29": "absent", "zone_30": "absent", "zone_31": "absent"}}}
+      ]
+    },
+    {
+      "name": "with 32 zones in use, zones past the 16th get entities and states too",
+      "ported_from": "sensors/with 32 zones in use, zones past the 16th are published too",
+      "panel": {"zones": [[1, "Zone 1"], [1, "Zone 2"], [1, "Zone 3"], [1, "Zone 4"], [1, "Zone 5"], [1, "Zone 6"], [1, "Zone 7"], [1, "Zone 8"], [1, "Zone 9"], [1, "Zone 10"], [1, "Zone 11"], [1, "Zone 12"], [1, "Zone 13"], [1, "Zone 14"], [1, "Zone 15"], [1, "Zone 16"], [1, "Zone 17"], [1, "Zone 18"], [1, "Zone 19"], [1, "Zone 20"], [1, "Zone 21"], [1, "Zone 22"], [1, "Zone 23"], [1, "Zone 24"], [1, "Zone 25"], [1, "Zone 26"], [1, "Zone 27"], [1, "Zone 28"], [1, "Zone 29"], [1, "Zone 30"], [1, "Zone 31"], [1, "Zone 32"]]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off", "zone_6": "off", "zone_7": "off", "zone_8": "off", "zone_9": "off", "zone_10": "off", "zone_11": "off", "zone_12": "off", "zone_13": "off", "zone_14": "off", "zone_15": "off", "zone_16": "off", "zone_17": "off", "zone_18": "off", "zone_19": "off", "zone_20": "off", "zone_21": "off", "zone_22": "off", "zone_23": "off", "zone_24": "off", "zone_25": "off", "zone_26": "off", "zone_27": "off", "zone_28": "off", "zone_29": "off", "zone_30": "off", "zone_31": "off"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off", "zone_6": "off", "zone_7": "off", "zone_8": "off", "zone_9": "off", "zone_10": "off", "zone_11": "off", "zone_12": "off", "zone_13": "off", "zone_14": "off", "zone_15": "on", "zone_16": "on", "zone_17": "off", "zone_18": "off", "zone_19": "off", "zone_20": "off", "zone_21": "off", "zone_22": "off", "zone_23": "off", "zone_24": "off", "zone_25": "off", "zone_26": "off", "zone_27": "off", "zone_28": "off", "zone_29": "off", "zone_30": "off", "zone_31": "on"}}},
+        {"panel_status": {"statuszone": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off", "zone_6": "off", "zone_7": "off", "zone_8": "off", "zone_9": "off", "zone_10": "off", "zone_11": "off", "zone_12": "off", "zone_13": "off", "zone_14": "off", "zone_15": "off", "zone_16": "on", "zone_17": "off", "zone_18": "off", "zone_19": "off", "zone_20": "off", "zone_21": "off", "zone_22": "off", "zone_23": "off", "zone_24": "off", "zone_25": "off", "zone_26": "off", "zone_27": "off", "zone_28": "off", "zone_29": "off", "zone_30": "off", "zone_31": "on"}}}
+      ]
+    },
+    {
+      "name": "open codes 2, 4, 6 and 9 keep an open sensor open and open a closed one",
+      "ported_from": "sensors/open codes 2, 4, 6 and 9 keep an open sensor open and open a closed one",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "on", "zone_2": "on", "zone_3": "on", "zone_4": "off", "zone_5": "off"}}},
+        {"panel_status": {"statuszone": [2, 4, 6, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "on", "zone_2": "on", "zone_3": "on", "zone_4": "off", "zone_5": "off"}}},
+        {"panel_status": {"statuszone": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off", "zone_4": "off", "zone_5": "off"}}},
+        {"panel_status": {"statuszone": [2, 4, 6, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "on", "zone_2": "on", "zone_3": "on", "zone_4": "off", "zone_5": "off"}}}
+      ]
+    },
+    {
+      "name": "an unused slot in front has no zone entity, and the zones after it take the state of their own slot",
+      "ported_from": "sensors/an unused slot in front has no sensor, and the zones after it publish on their own slot",
+      "panel": {"zones": [[0, " "], [1, "Door"], [1, "Window"]]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "absent", "zone_1": "off", "zone_2": "off"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "absent", "zone_1": "off", "zone_2": "off"}}},
+        {"panel_status": {"statuszone": [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "absent", "zone_1": "on", "zone_2": "off"}}},
+        {"panel_status": {"statuszone": [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed", "zone_0": "absent", "zone_1": "off", "zone_2": "on"}}}
+      ]
+    },
+    {
+      "name": "an unused slot between zones has no zone entity, and the zone after it takes the state of its own slot",
+      "ported_from": "sensors/an unused slot between zones has no sensor, and the zone after it publishes on its own slot",
+      "panel": {"zones": [[1, "A"], [0, " "], [1, "B"]]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "absent", "zone_2": "off"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "absent", "zone_2": "on"}}},
+        {"panel_status": {"statuszone": [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "absent", "zone_2": "off"}}}
+      ]
+    },
+    {
+      "name": "zones of area 2 and of both areas are monitored like those of area 1, each on its own slot",
+      "ported_from": "sensors/zones of area 2 and of both areas are monitored like those of area 1, each on its own slot",
+      "panel": {"zones": [[2, "Area two"], [1, "One"], [3, "Both"], [1, "Two"]]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "off", "zone_3": "off"}}},
+      "steps": [
+        {"panel_status": {"statuszone": [0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "off", "zone_2": "on", "zone_3": "on"}}},
+        {"panel_status": {"statuszone": [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed", "zone_0": "off", "zone_1": "on", "zone_2": "off", "zone_3": "off"}}},
+        {"panel_status": {"statuszone": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "advance_s": 1, "expect": {"panel_requests_any_order": ["GET /statuslive.html", "GET /keep_alive.html?msgid=1"], "states": {"area_0": "disarmed", "zone_0": "on", "zone_1": "off", "zone_2": "off", "zone_3": "off"}}}
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "name": "arm away: the panel is told to arm, and the poll that follows at once shows armed_away",
+      "ported_from": "mqtt_commands/arm command: panel is told to arm, the next poll publishes ON",
+      "panel": {"useraccess": [1, 0]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"action": {"service": "alarm_arm_away", "area": 0}, "expect": {"panel_requests": ["GET /statuslive.html?area=00&value=r", "GET /statuslive.html"], "states": {"area_0": "armed_away"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "armed_away"}}}
+      ]
+    },
+    {
+      "name": "disarm: the panel is told to disarm, and the poll that follows at once shows disarmed",
+      "ported_from": "mqtt_commands/disarm command: panel is told to disarm, the next poll publishes OFF",
+      "panel": {"useraccess": [2, 0]},
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "armed_away"}}},
+      "steps": [
+        {"action": {"service": "alarm_disarm", "area": 0}, "expect": {"panel_requests": ["GET /statuslive.html?area=00&value=d", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "a command failing with HTTP 500 raises command_failed, is not retried, and polling goes on",
+      "ported_from": "mqtt_commands/a command failing with HTTP 500 is logged, not retried, and does not stop the bridge",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1}, "action": {"service": "alarm_arm_away", "area": 0}, "expect": {"action_error": "command_failed", "panel_requests": ["GET /statuslive.html?area=00&value=r"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "a command with a reset connection raises command_failed and polling goes on",
+      "ported_from": "mqtt_commands/a command with a reset connection is logged and does not stop the bridge",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_fault": {"path": "/statuslive.html", "kind": "reset", "times": 2}, "action": {"service": "alarm_disarm", "area": 0}, "expect": {"action_error": "command_failed", "panel_requests": ["GET /statuslive.html?area=00&value=d", "GET /statuslive.html?area=00&value=d"], "states": {"area_0": "disarmed"}}},
+        {"advance_s": 1, "expect": {"panel_requests": ["GET /statuslive.html"], "states": {"area_0": "disarmed"}}}
+      ]
+    },
+    {
+      "name": "a command answered with the login page after session expiry raises command_failed and is not retried",
+      "ported_from": "mqtt_commands/a command answered with the login page after session expiry is logged as an error",
+      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
+      "steps": [
+        {"panel_expire_session": true, "action": {"service": "alarm_arm_away", "area": 0}, "expect": {"action_error": "command_failed", "panel_requests": ["GET /statuslive.html?area=00&value=r"], "states": {"area_0": "disarmed"}}}
+      ]
+    }
+  ],
+  "setup_failures": [
+    {
+      "name": "with wrong panel credentials the setup fails and reauth starts",
+      "ported_from": "failures/wrong panel credentials exit with code 1",
+      "panel": {"accept_login": false},
+      "setup": {"expect": {"entry_state": "setup_error", "reauth_in_progress": true, "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /logout.html"], "states": {"area_0": "absent", "zone_0": "absent"}}},
+      "steps": [
+        {"advance_s": 10, "expect": {"states": {"area_0": "absent", "zone_0": "absent"}}}
+      ]
+    },
+    {
+      "name": "an unreachable panel retries the setup",
+      "ported_from": "failures/an unreachable panel exits with code 1",
+      "panel": {"down": true},
+      "setup": {"expect": {"entry_state": "setup_retry", "reauth_in_progress": false, "panel_requests": ["GET /logout.html", "GET /logout.html", "GET /login_page.html", "GET /login_page.html", "GET /logout.html", "GET /logout.html"], "states": {"area_0": "absent", "zone_0": "absent"}}}
+    },
+    {
+      "name": "after a login page request failing with HTTP 500 the setup is retried",
+      "ported_from": "failures/a login page request failing with HTTP 500 exits with code 1",
+      "panel": {"faults": [{"path": "/login_page.html", "kind": "http_500"}]},
+      "setup": {"expect": {"entry_state": "setup_retry", "reauth_in_progress": false, "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /logout.html"], "states": {"area_0": "absent", "zone_0": "absent"}}}
+    },
+    {
+      "name": "after a login page without a session value the setup is retried",
+      "ported_from": "failures/a login page without a session value exits with code 1",
+      "panel": {"faults": [{"path": "/login_page.html", "kind": "garbage"}]},
+      "setup": {"expect": {"entry_state": "setup_retry", "reauth_in_progress": false, "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /logout.html"], "states": {"area_0": "absent", "zone_0": "absent"}}}
+    },
+    {
+      "name": "a default page with another title means login failed: the setup fails and reauth starts",
+      "ported_from": "failures/a default page with another title means login failed and exits with code 1",
+      "panel": {"faults": [{"path": "/default.html", "kind": "wrong_title"}]},
+      "setup": {"expect": {"entry_state": "setup_error", "reauth_in_progress": true, "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /logout.html"], "states": {"area_0": "absent", "zone_0": "absent"}}}
+    },
+    {
+      "name": "a permanently failing index page is requested 11 times, then the panel is logged out and the setup retried",
+      "ported_from": "failures/a permanently failing index page is requested 11 times, 1000 ms apart, then the session is logged out and the exit code is 1",
+      "note": "The bridge's steps of 999 ms, 1 ms and nine of 1000 ms, which expect one index page request per second, are joined into the setup's 10 s, so the row checks that the retries end within 10 s; the client's own tests pin the 1000 ms between them.",
+      "panel": {"faults": [{"path": "/index.html", "kind": "http_500"}]},
+      "setup": {"advance_s": 10, "expect": {"entry_state": "setup_retry", "reauth_in_progress": false, "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /index.html", "GET /logout.html", "GET /logout.html"], "states": {"area_0": "absent", "zone_0": "absent"}}}
+    }
+  ]
+}

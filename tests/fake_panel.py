@@ -24,6 +24,8 @@ ZONE_SLOTS: Final = 32
 _UNUSED_SLOT: Final = (0, " ")
 _COMMAND_AREA_CODES: Final = {"r": 2, "s": 5, "p": 4, "d": 1}
 _STALL_POLL_SECONDS: Final = 0.01
+GARBAGE_PAGE: Final = "<html>no status tables here</html>"
+WRONG_TITLE_PAGE: Final = "<html><head><title>Other</title></head><body></body></html>"
 
 
 def _read_page(name: str) -> str:
@@ -117,6 +119,31 @@ class Cut:
 type PanelResult = FakeResponse | Reset | Hang | Stall | Cut
 
 
+def fault_result(kind: str, session_value: str, page: str = "") -> PanelResult:
+    """
+    Return the answer of a panel that fails a request as ``kind``.
+
+    ``http_500`` is status 500, ``reset`` a ``Reset`` and ``hang`` a ``Hang``. The
+    other kinds are status 200 with a page: ``login_page`` the login page handing
+    out ``session_value``, ``garbage`` one with neither a session value nor status
+    tables, ``wrong_title`` one titled ``Other``, and ``page`` the given ``page``.
+
+    Raises ``ValueError`` for any other ``kind``.
+    """
+    results: dict[str, PanelResult] = {
+        "http_500": FakeResponse(status=500, body="error"),
+        "reset": Reset(),
+        "hang": Hang(),
+        "login_page": FakeResponse(body=render_login_page(session_value)),
+        "garbage": FakeResponse(body=GARBAGE_PAGE),
+        "wrong_title": FakeResponse(body=WRONG_TITLE_PAGE),
+        "page": FakeResponse(body=page),
+    }
+    if kind not in results:
+        raise ValueError(f"Unknown fault {kind!r}")
+    return results[kind]
+
+
 @dataclass(frozen=True, slots=True)
 class PanelRequest:
     """
@@ -185,6 +212,8 @@ class FakePanel:
         self.troubles = list(options.troubles)
         self.require_login = options.require_login
         self.logged_in = False
+        self.down = False
+        """Answer every request with ``Reset``, whatever the overrides."""
         self.requests: list[PanelRequest] = []
         self.stalls_closed_by_client = 0
         self._overrides: list[_Override] = []
@@ -245,6 +274,8 @@ class FakePanel:
         self._released.set()
 
     def handle(self, request: PanelRequest) -> PanelResult:
+        if self.down:
+            return Reset()
         if (override := self._next_override(request)) is not None:
             return override
 
