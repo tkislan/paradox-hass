@@ -63,6 +63,16 @@ def zone_states(hass: HomeAssistant) -> dict[str, str]:
     }
 
 
+def zone_registry_entries(hass: HomeAssistant, entry_id: str) -> list[er.RegistryEntry]:
+    return [
+        registry_entry
+        for registry_entry in er.async_entries_for_config_entry(
+            er.async_get(hass), entry_id
+        )
+        if registry_entry.domain == Platform.BINARY_SENSOR
+    ]
+
+
 def problems(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     """List the warnings and errors, except the notice about a custom integration."""
     return [r for r in problem_records(caplog) if r.name != "homeassistant.loader"]
@@ -121,7 +131,7 @@ async def test_setup_creates_a_motion_sensor_for_each_zone_in_use(
     await setup_entry(hass, mock_config_entry)
 
     entry_id = mock_config_entry.entry_id
-    registry_entries = er.async_entries_for_config_entry(er.async_get(hass), entry_id)
+    registry_entries = zone_registry_entries(hass, entry_id)
     assert mock_config_entry.state is ConfigEntryState.LOADED
     assert {entry.entity_id: entry.unique_id for entry in registry_entries} == {
         "binary_sensor.paradox_predsien": f"{entry_id}_zone_0",
@@ -174,7 +184,7 @@ async def test_unused_zone_slots_get_no_entity_and_the_rest_keep_their_slot(
     await setup_entry(hass, mock_config_entry)
 
     entry_id = mock_config_entry.entry_id
-    registry_entries = er.async_entries_for_config_entry(er.async_get(hass), entry_id)
+    registry_entries = zone_registry_entries(hass, entry_id)
     assert {entry.entity_id: entry.unique_id for entry in registry_entries} == {
         "binary_sensor.paradox_hall": f"{entry_id}_zone_0",
         "binary_sensor.paradox_garage": f"{entry_id}_zone_2",
@@ -570,9 +580,7 @@ async def test_zone_taken_out_of_use_disappears_after_a_reload(
     await hass.config_entries.async_reload(mock_config_entry.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
 
-    registry_entries = er.async_entries_for_config_entry(
-        er.async_get(hass), mock_config_entry.entry_id
-    )
+    registry_entries = zone_registry_entries(hass, mock_config_entry.entry_id)
     assert {entry.entity_id for entry in registry_entries} == set(ZONE_ENTITY_IDS[:4])
     assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS[:4], "off")
 

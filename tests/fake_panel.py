@@ -167,6 +167,7 @@ class _Override:
     path: str
     result: PanelResult | Responder
     times: int | None
+    when: Callable[[PanelRequest], bool] | None
 
 
 class FakePanel:
@@ -219,15 +220,22 @@ class FakePanel:
         self.logged_in = False
 
     def respond_with(
-        self, path: str, result: PanelResult | Responder, times: int | None = None
+        self,
+        path: str,
+        result: PanelResult | Responder,
+        times: int | None = None,
+        when: Callable[[PanelRequest], bool] | None = None,
     ) -> None:
         """
         Answer the next ``times`` requests for ``path`` with ``result``.
 
         ``times=None`` answers every request. Overrides for one path are used in the
         order they were added. ``result`` may be a function of the request.
+
+        With ``when``, the override only sees requests for which ``when(request)`` is
+        true. Any other request skips it without using up ``times``.
         """
-        self._overrides.append(_Override(path, result, times))
+        self._overrides.append(_Override(path, result, times, when))
 
     def clear_overrides(self) -> None:
         self._overrides = []
@@ -266,7 +274,11 @@ class FakePanel:
 
     def _next_override(self, request: PanelRequest) -> PanelResult | None:
         for override in self._overrides:
-            if override.path == request.path and override.times != 0:
+            if (
+                override.path == request.path
+                and override.times != 0
+                and (override.when is None or override.when(request))
+            ):
                 if override.times is not None:
                     override.times -= 1
                 result = override.result

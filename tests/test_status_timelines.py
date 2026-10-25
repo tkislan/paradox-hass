@@ -1,4 +1,4 @@
-"""Replay the zone timelines of the bridge's status_machine.json in Home Assistant."""
+"""Replay the zone and area-0 timelines of the bridge's status_machine.json."""
 
 from itertools import groupby
 from typing import TYPE_CHECKING, Any, Final
@@ -22,15 +22,26 @@ if TYPE_CHECKING:
 STATUS_PATH: Final = "/statuslive.html"
 GROUPS: Final = (
     "first_poll",
+    "armed_codes",
     "sensor_codes",
     "transitions",
     "zone_indexing",
     "failures",
 )
 ROW_KEYS: Final = {"zones", "polls", "expected_events"}
+ARMED_BY_STATE: Final = {
+    "armed_away": True,
+    "armed_home": True,
+    "armed_night": True,
+    "arming": True,
+    "pending": True,
+    "disarmed": False,
+    "unknown": None,
+}
 
 type Row = dict[str, Any]
 type Histories = dict[int, list[str]]
+type Armed = list[bool | None]
 
 
 ROWS: Final[list[tuple[str, Row]]] = [
@@ -47,8 +58,20 @@ def _param(group: str, row: Row) -> ParameterSet:
 FAILED_FIRST_POLL: Final = [
     _param(group, row) for group, row in ROWS if "fail" in row["polls"][0]
 ]
+# No row of the bridge's table starts on a code outside the table for a used area.
+# This one checks that such an area still gets an entity, in the unknown state.
+UNKNOWN_FIRST_POLL: Final[Row] = {
+    "name": "unknown on the first poll is not announced",
+    "zones": [[1, "A"]],
+    "polls": [
+        {"statuszone": [0, 0], "useraccess": [11, 0]},
+        {"statuszone": [0, 0], "useraccess": [2, 0]},
+    ],
+    "expected_events": [["armedChanged", True]],
+}
 SERVED_FIRST_POLL: Final = [
-    _param(group, row) for group, row in ROWS if "fail" not in row["polls"][0]
+    *(_param(group, row) for group, row in ROWS if "fail" not in row["polls"][0]),
+    _param("local", UNKNOWN_FIRST_POLL),
 ]
 
 
@@ -92,10 +115,33 @@ def zone_states(hass: HomeAssistant, entity_ids: dict[int, str]) -> dict[int, st
     return {slot: state.state for slot, state in states.items()}
 
 
+def area_0_state(hass: HomeAssistant, entity_id: str | None) -> str | None:
+    if entity_id is None:
+        return None
+    state = hass.states.get(entity_id)
+    assert state is not None, f"Entity without a state: {entity_id}"
+    return state.state
+
+
 def normalised(states: list[str]) -> list[str]:
     """Drop ``unavailable``, repeats and the closed state the bridge assumed first."""
     changes = [state for state, _ in groupby(s for s in states if s != "unavailable")]
     return changes[1:] if changes[:1] == ["off"] else changes
+
+
+def armed_history(states: list[str | None]) -> Armed:
+    """
+    Map area states to armedChanged values, dropping ``unavailable`` and repeats.
+
+    The unknown state the bridge assumes first is never announced, so it is dropped.
+    """
+    flags = [
+        ARMED_BY_STATE[state]
+        for state in states
+        if state is not None and state != "unavailable"
+    ]
+    changes = [flag for flag, _ in groupby(flags)]
+    return changes[1:] if changes[:1] == [None] else changes
 
 
 def expected_histories(row: Row) -> Histories:
@@ -109,13 +155,17 @@ def expected_histories(row: Row) -> Histories:
     return histories
 
 
+def expected_armed(row: Row) -> Armed:
+    return [event[1] for event in row["expected_events"] if event[0] == "armedChanged"]
+
+
 async def replay(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     panel: FakePanel,
     entry: MockConfigEntry,
     row: Row,
-) -> Histories:
+) -> tuple[Histories, Armed]:
     panel.zones = [(bitmask, name) for bitmask, name in row["zones"]]
     first, *later = row["polls"]
     serve(panel, first)
@@ -123,8 +173,10 @@ async def replay(
     assert entry.state is ConfigEntryState.LOADED
 
     entity_ids = zone_entity_ids(hass, entry)
+    area_id = entity_id_for(hass, entry, Platform.ALARM_CONTROL_PANEL, "area_0")
 
     observed = [zone_states(hass, entity_ids)]
+    area_observed = [area_0_state(hass, area_id)]
     for poll in later:
         serve(panel, poll)
         await tick(hass, freezer)
@@ -133,22 +185,28 @@ async def replay(
         assert unavailable == (set(entity_ids) if "fail" in poll else set())
         observed.append(states)
 
-    return {
+        area = area_0_state(hass, area_id)
+        assert area is None or (area == "unavailable") == ("fail" in poll)
+        area_observed.append(area)
+
+    histories = {
         slot: normalised([states[slot] for states in observed]) for slot in entity_ids
     }
+    return histories, armed_history(area_observed)
 
 
 @pytest.mark.parametrize("row", SERVED_FIRST_POLL)
-async def test_zone_states_follow_the_polls(
+async def test_zone_and_area_states_follow_the_polls(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     panel: FakePanel,
     mock_config_entry: MockConfigEntry,
     row: Row,
 ) -> None:
-    histories = await replay(hass, freezer, panel, mock_config_entry, row)
+    histories, armed = await replay(hass, freezer, panel, mock_config_entry, row)
 
     assert histories == expected_histories(row)
+    assert armed == expected_armed(row)
 
 
 @pytest.mark.parametrize("row", FAILED_FIRST_POLL)

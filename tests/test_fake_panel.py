@@ -79,6 +79,10 @@ def problems(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [record.getMessage() for record in problem_records(caplog)]
 
 
+def area_one(request: PanelRequest) -> bool:
+    return request.query.get("area") == "01"
+
+
 def test_index_page_drops_zones_past_slot_32() -> None:
     given = [(1, f"Zone {i}") for i in range(33)]
 
@@ -347,6 +351,35 @@ def test_a_function_is_called_with_the_request_and_counts_as_one_use() -> None:
     assert body_of(first) == "07"
     assert [request.query for request in seen] == [{"area": "07"}]
     assert parse_status_page(body_of(second)).statuszone == (0,) * 32
+
+
+def test_a_request_that_does_not_match_falls_through_to_the_next_override() -> None:
+    panel = make_panel()
+    panel.respond_with("/keep_alive.html", FakeResponse(body="one"), when=area_one)
+    panel.respond_with("/keep_alive.html", FakeResponse(body="two"))
+
+    assert body_of(get(panel, "/keep_alive.html?area=01")) == "one"
+    assert body_of(get(panel, "/keep_alive.html?area=00")) == "two"
+    assert body_of(get(panel, "/keep_alive.html")) == "two"
+
+
+def test_requests_that_do_not_match_when_use_no_times_and_call_no_function() -> None:
+    panel = make_panel()
+    seen: list[dict[str, str]] = []
+
+    def responder(request: PanelRequest) -> PanelResult:
+        seen.append(request.query)
+        return FakeResponse(body="override")
+
+    panel.respond_with("/keep_alive.html", responder, times=1, when=area_one)
+
+    answers = [
+        body_of(get(panel, f"/keep_alive.html?area={area}"))
+        for area in ("00", "01", "01")
+    ]
+
+    assert answers == ["", "override", ""]
+    assert seen == [{"area": "01"}]
 
 
 def test_clear_overrides_restores_normal_answers() -> None:
