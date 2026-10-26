@@ -5,6 +5,7 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
 )
 
+from tests.fake_panel import FakeResponse
 from tests.helpers import setup_entry
 
 if TYPE_CHECKING:
@@ -83,3 +84,24 @@ async def test_diagnostics_keep_the_last_status_after_a_failed_poll(
 
     assert diagnostics["last_update_success"] is False
     assert diagnostics["status"]["troubles"] == [16]
+
+
+async def test_diagnostics_of_an_entry_that_did_not_load_hold_only_the_entry(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    panel.respond_with("/statuslive.html", FakeResponse(status=500, body="error"))
+    await setup_entry(hass, mock_config_entry)
+
+    diagnostics = await get_diagnostics_for_config_entry(
+        hass, hass_client, mock_config_entry
+    )
+
+    assert set(diagnostics) == {"entry"}
+    assert diagnostics["entry"]["data"] == {
+        "host": panel.host,
+        "username": REDACTED,
+        "password": REDACTED,
+    }
