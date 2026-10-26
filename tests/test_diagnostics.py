@@ -1,3 +1,5 @@
+# ruff: noqa: PTH110, BLE001, ASYNC240
+import os
 from typing import TYPE_CHECKING
 
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -44,9 +46,39 @@ async def test_diagnostics_hold_the_entry_without_credentials_the_layout_and_the
         "username": REDACTED,
         "password": REDACTED,
     }
-    assert diagnostics == snapshot(
-        exclude=props("entry_id", "created_at", "modified_at", "host")
-    )
+    snap = snapshot(exclude=props("entry_id", "created_at", "modified_at", "host"))
+    try:
+        assert diagnostics == snap
+    except AssertionError as err:
+        ext = snap.extension
+        tl = snap.test_location
+        loc = ext.get_location(test_location=tl, index=snap.index)
+        name = ext.get_snapshot_name(test_location=tl, index=snap.index)
+        info = {
+            "loc": loc,
+            "exists": os.path.exists(loc),
+            "name": name,
+            "index": snap.index,
+            "ext": type(ext).__name__,
+            "tl_file": tl.filepath,
+            "dirname": ext.dirname(test_location=tl),
+        }
+        try:
+            data = ext.read_snapshot_data_from_location(
+                snapshot_location=loc,
+                snapshot_name=name,
+                session_id=str(id(snap.session)),
+            )
+            info["recall"] = None if data is None else data[:60]
+        except Exception as exc:
+            info["recall_err"] = repr(exc)
+        try:
+            data = snap.session.recall_snapshot(ext, tl, snap.index)
+            info["session_recall"] = None if data is None else data[:60]
+        except Exception as exc:
+            info["session_recall_err"] = repr(exc)
+        info["orig"] = str(err)[:200]
+        raise AssertionError(repr(info)) from err
 
 
 async def test_diagnostics_keep_the_last_status_after_a_failed_poll(
