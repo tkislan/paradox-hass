@@ -89,6 +89,7 @@ SETTLE_ROUNDS: Final = 1000
 PLATFORMS: Final = {
     "zone": Platform.BINARY_SENSOR,
     "area": Platform.ALARM_CONTROL_PANEL,
+    "trouble": Platform.BINARY_SENSOR,
 }
 
 

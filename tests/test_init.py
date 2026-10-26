@@ -27,7 +27,14 @@ from tests.fake_panel import (
     render_index_page,
     render_login_page,
 )
-from tests.helpers import advance, entity_id_for, hang_once, setup_entry, tick
+from tests.helpers import (
+    TROUBLE_ENTITY_ID,
+    advance,
+    entity_id_for,
+    hang_once,
+    setup_entry,
+    tick,
+)
 from tests.logs import problem_records
 
 if TYPE_CHECKING:
@@ -54,7 +61,9 @@ SLOT_0_OPEN: Final = [1, *[0] * 31]
 
 def zone_states(hass: HomeAssistant) -> dict[str, str]:
     return {
-        state.entity_id: state.state for state in hass.states.async_all("binary_sensor")
+        state.entity_id: state.state
+        for state in hass.states.async_all("binary_sensor")
+        if state.entity_id != TROUBLE_ENTITY_ID
     }
 
 
@@ -65,6 +74,7 @@ def zone_registry_entries(hass: HomeAssistant, entry_id: str) -> list[er.Registr
             er.async_get(hass), entry_id
         )
         if registry_entry.domain == Platform.BINARY_SENSOR
+        and registry_entry.entity_id != TROUBLE_ENTITY_ID
     ]
 
 

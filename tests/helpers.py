@@ -1,6 +1,6 @@
 import asyncio
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import (
@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
     from tests.fake_panel import FakePanel, PanelRequest, PanelResult
+
+TROUBLE_ENTITY_ID: Final = "binary_sensor.paradox_trouble"
 
 
 async def setup_entry(hass: HomeAssistant, entry: MockConfigEntry) -> None:
