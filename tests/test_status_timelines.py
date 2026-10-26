@@ -177,16 +177,27 @@ async def replay(
 
     observed = [zone_states(hass, entity_ids)]
     area_observed = [area_0_state(hass, area_id)]
+    logged_in_again = False
     for poll in later:
+        # A poll the panel answered but that failed starts a new login, which keeps the
+        # entities available. The rows run for seconds, and no second login starts
+        # within a minute of the first, so a later answered failure makes them
+        # unavailable.
+        answered_failure = "fail" in poll and "connection" not in poll["fail"]
+        expect_unavailable = "fail" in poll and (
+            not answered_failure or logged_in_again
+        )
+        logged_in_again = logged_in_again or answered_failure
+
         serve(panel, poll)
         await tick(hass, freezer)
         states = zone_states(hass, entity_ids)
         unavailable = {slot for slot, s in states.items() if s == "unavailable"}
-        assert unavailable == (set(entity_ids) if "fail" in poll else set())
+        assert unavailable == (set(entity_ids) if expect_unavailable else set())
         observed.append(states)
 
         area = area_0_state(hass, area_id)
-        assert area is None or (area == "unavailable") == ("fail" in poll)
+        assert area is None or (area == "unavailable") == expect_unavailable
         area_observed.append(area)
 
     histories = {
