@@ -1,4 +1,4 @@
-# ruff: noqa
+# ruff: noqa: PTH109, E501, FBT003, PGH004
 import hashlib
 import locale
 import os
