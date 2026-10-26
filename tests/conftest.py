@@ -4,6 +4,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.syrupy import (
+    HomeAssistantSnapshotExtension,
+)
 
 from custom_components.paradox.const import DOMAIN
 from tests.fake_panel import FakePanel, FakePanelOptions
@@ -13,6 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
 
     from pytest_aiohttp.plugin import AiohttpServer
+    from syrupy.assertion import SnapshotAssertion
 
 # Before tests.scenarios is first imported, so that its checks report a diff.
 pytest.register_assert_rewrite("tests.scenarios")
@@ -96,3 +100,15 @@ def mock_config_entry(panel: FakePanel) -> MockConfigEntry:
         title="Paradox",
         data={"host": panel.host, "username": "user", "password": "1234"},
     )
+
+
+@pytest.fixture
+def snapshot(snapshot: SnapshotAssertion) -> SnapshotAssertion:
+    """
+    Read and write ``tests/snapshots`` with the Home Assistant extension.
+
+    pytest-homeassistant-custom-component and syrupy both define ``snapshot``. Which
+    one a test gets depends on the order the plugins load in, which differs between
+    machines, and syrupy's own reads ``tests/__snapshots__``.
+    """
+    return snapshot.use_extension(HomeAssistantSnapshotExtension)
