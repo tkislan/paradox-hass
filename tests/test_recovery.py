@@ -10,7 +10,7 @@ from homeassistant.util.async_ import get_scheduled_timer_handles
 
 from custom_components.paradox.panel.client import INDEX_RETRY_WAIT
 from tests.fake_panel import FakeResponse, Hang, Reset, render_index_page
-from tests.helpers import advance, hang_once, setup_entry, tick
+from tests.helpers import TROUBLE_ENTITY_ID, advance, hang_once, setup_entry, tick
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -48,7 +48,9 @@ SETTLE_ROUNDS: Final = 1000
 
 def zone_states(hass: HomeAssistant) -> dict[str, str]:
     return {
-        state.entity_id: state.state for state in hass.states.async_all("binary_sensor")
+        state.entity_id: state.state
+        for state in hass.states.async_all("binary_sensor")
+        if state.entity_id != TROUBLE_ENTITY_ID
     }
 
 
