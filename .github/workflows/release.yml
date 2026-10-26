@@ -1,0 +1,27 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Write the release tag into the manifest
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          jq --arg v "$version" '.version = $v' custom_components/paradox/manifest.json > manifest.tmp
+          mv manifest.tmp custom_components/paradox/manifest.json
+      - name: Zip the integration
+        run: |
+          cd custom_components/paradox
+          zip -r "$GITHUB_WORKSPACE/paradox.zip" . -x '*__pycache__/*'
+      - name: Attach the zip to the release
+        run: gh release upload "$GITHUB_REF_NAME" "$GITHUB_WORKSPACE/paradox.zip" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
