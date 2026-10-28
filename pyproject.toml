@@ -11,7 +11,7 @@ package = false
 dev = [
     "pytest-homeassistant-custom-component==0.13.373",
     "ruff==0.17.1",
-    "mypy==2.1.0",
+    "mypy==2.4.0",
 ]
 
 [tool.pytest.ini_options]
