@@ -9,7 +9,7 @@ package = false
 
 [dependency-groups]
 dev = [
-    "pytest-homeassistant-custom-component==0.13.373",
+    "pytest-homeassistant-custom-component==0.13.374",
     "ruff==0.17.1",
     "mypy==2.1.0",
 ]
