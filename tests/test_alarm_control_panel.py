@@ -116,8 +116,6 @@ def hang_and_signal(arrived: asyncio.Event) -> PanelResult:
 
 
 def report_area_code(panel: FakePanel, code: int) -> None:
-    """Answer every command with an empty page, after setting area 1 to ``code``."""
-
     def respond(_request: PanelRequest) -> PanelResult:
         panel.set_status(useraccess=[code, 0])
         return FakeResponse(body="")
@@ -343,7 +341,6 @@ async def test_command_failing_on_every_attempt_raises_command_failed_at_20_s(
     assert raised.value.translation_key == "command_failed"
     assert raised.value.translation_placeholders == {"area": "Cast 1", "reason": reason}
     assert type(raised.value.__cause__) is cause
-    # Attempts at 0, 5, 10 and 15 s.
     assert command_lines(panel) == [ARM_REQUEST] * (4 * times)
     assert alarm_states(hass) == {AREA_0: "disarmed"}
     assert [
@@ -594,7 +591,6 @@ async def test_status_kept_after_a_failed_poll_does_not_confirm_a_command(
     task = asyncio.create_task(call(hass, "alarm_disarm", AREA_0))
     try:
         await settle(hass, task)
-        # The read after the command failed, and kept the disarmed status.
         assert (
             panel.request_lines[seen_at_setup:] == [DISARM_REQUEST] * 2 + [STATUS] * 2
         )

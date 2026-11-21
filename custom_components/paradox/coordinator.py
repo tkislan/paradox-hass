@@ -145,8 +145,7 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
                     while True:
                         # No new login may start within 60 s of the rejected one and
                         # Home Assistant has stopped the timed polls, so no later
-                        # attempt can be confirmed, and every retry would only lead
-                        # to more rejected logins.
+                        # attempt can be confirmed.
                         if self._login_rejected:
                             LOGGER.warning(
                                 "%s: stopped after attempt %d: "
@@ -191,7 +190,6 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
     async def _async_send_attempt(
         self, area: int, command: PanelCommand, label: str, attempt: int
     ) -> ParadoxError | None:
-        """Send one command request, log how it ended, and return its error."""
         try:
             await self.client.async_command(area, command)
         except ParadoxClosedError:

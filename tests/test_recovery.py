@@ -332,8 +332,7 @@ async def test_hanging_status_page_is_polled_every_21_s_and_logged_in_again_at_8
     arrived = hang_every_request(panel, "/statuslive.html")
 
     # Polls go out at 1, 22 and 43 s and fail 20 s later, at 21, 42 and 63 s; the
-    # failure at 21 s starts the 60 s count, and the one at 42 s, the first 30 s or
-    # more after the setup's poll, makes the entities unavailable.
+    # failure at 21 s starts the 60 s count.
     for _ in range(3):
         await advance(hass, freezer, 1)
         await arrived.wait()
