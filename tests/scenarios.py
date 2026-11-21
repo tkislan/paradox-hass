@@ -1,6 +1,5 @@
 """Play the rows of ``tests/spec/ha_scenarios.json``, described in its ``_comment``."""
 
-import asyncio
 from collections import Counter
 from contextlib import contextmanager
 from datetime import timedelta
@@ -13,12 +12,16 @@ from homeassistant.const import Platform
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-from homeassistant.util.async_ import get_scheduled_timer_handles
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.paradox.const import DOMAIN
 from tests.fake_panel import fault_result
-from tests.helpers import entity_id_for, tick
+from tests.helpers import (
+    SETTLE_ROUNDS,
+    entity_id_for,
+    run_while_ticking,
+    waits_for_the_clock,
+)
 from tests.spec_tables import spec_text
 
 if TYPE_CHECKING:
@@ -70,7 +73,7 @@ STEP_KEYS: Final = {
     "expect",
 }
 STATUS_KEYS: Final = {"statuszone", "useraccess", "alarms", "troubles"}
-ACTION_KEYS: Final = {"service", "area"}
+ACTION_KEYS: Final = {"service", "area", "advance_s"}
 EXPECT_KEYS: Final = {
     "entry_state",
     "reauth_in_progress",
@@ -85,7 +88,6 @@ REQUEST_KEYS: Final = {
     "panel_requests_any_order",
     "panel_request_counts",
 }
-SETTLE_ROUNDS: Final = 1000
 PLATFORMS: Final = {
     "zone": Platform.BINARY_SENSOR,
     "area": Platform.ALARM_CONTROL_PANEL,
@@ -180,25 +182,6 @@ def _build_panel(
         _add_fault(panel, fault)
 
 
-def _waits_for_the_clock(task: asyncio.Task[Any]) -> bool:
-    # Private attributes: asyncio.capture_call_graph shows that a task is in
-    # asyncio.sleep, but not whether a live timer will wake it.
-    waiter = task._fut_waiter
-    return waiter is not None and any(
-        handle._args[:1] == (waiter,)
-        for handle in get_scheduled_timer_handles(task.get_loop())
-        if not handle.cancelled()
-    )
-
-
-async def _settle(task: asyncio.Task[Any]) -> None:
-    for _ in range(SETTLE_ROUNDS):
-        if task.done() or _waits_for_the_clock(task):
-            return
-        await asyncio.sleep(0)
-    raise AssertionError("The setup neither ended nor waited for the clock")
-
-
 async def _tick(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory, seconds: int
 ) -> None:
@@ -211,7 +194,7 @@ async def _tick(
             # A new login parked between two index page attempts is such a task, and
             # ``tick`` would wait for it forever.
             if all(
-                task.done() or _waits_for_the_clock(task)
+                task.done() or waits_for_the_clock(task)
                 for task in hass._background_tasks
             ):
                 break
@@ -226,40 +209,38 @@ async def _set_up(
     seconds: int | None,
 ) -> None:
     # Once the integration is set up, the setup of an entry runs in the task that
-    # asks for it, which is the task that _waits_for_the_clock looks at.
+    # asks for it, which is the task that waits_for_the_clock looks at.
     assert await async_setup_component(hass, DOMAIN, {})
     entry.add_to_hass(hass)
     if seconds is None:
         await hass.config_entries.async_setup(entry.entry_id)
     else:
-        # Not a task of Home Assistant's, which ``tick`` would wait for.
-        setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
-        try:
-            # A tick while a request is on its way would fire the request's timeouts.
-            for _ in range(seconds):
-                await _settle(setup)
-                await tick(hass, freezer)
-            await _settle(setup)
-            assert setup.done(), f"The setup is still running after {seconds} s"
-            await setup
-        finally:
-            setup.cancel()
+        await run_while_ticking(
+            hass, freezer, hass.config_entries.async_setup(entry.entry_id), seconds
+        )
     await hass.async_block_till_done(wait_background_tasks=True)
 
 
 async def _act(
-    hass: HomeAssistant, entry: MockConfigEntry, action: Mapping[str, Any]
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    entry: MockConfigEntry,
+    action: Mapping[str, Any],
 ) -> str | None:
     area = f"area_{action['area']}"
     entity_id = entity_id_for(hass, entry, Platform.ALARM_CONTROL_PANEL, area)
     assert entity_id is not None, f"No entity for {area}"
+    call = hass.services.async_call(
+        "alarm_control_panel",
+        action["service"],
+        {"entity_id": entity_id},
+        blocking=True,
+    )
     try:
-        await hass.services.async_call(
-            "alarm_control_panel",
-            action["service"],
-            {"entity_id": entity_id},
-            blocking=True,
-        )
+        if "advance_s" in action:
+            await run_while_ticking(hass, freezer, call, action["advance_s"])
+        else:
+            await call
     except HomeAssistantError as err:
         return err.translation_key or repr(err)
     return None
@@ -300,7 +281,9 @@ async def _play_step(
         panel.expire_session()
     if "panel_down" in step:
         panel.down = step["panel_down"]
-    error = await _act(hass, entry, step["action"]) if "action" in step else None
+    error = (
+        await _act(hass, freezer, entry, step["action"]) if "action" in step else None
+    )
     if "wall_clock_step_s" in step:
         step_wall_clock(step["wall_clock_step_s"])
     if "advance_s" in step:
