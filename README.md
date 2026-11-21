@@ -65,6 +65,8 @@ Everything belongs to one device, **Paradox**, which links to the module's web p
 
 An alarm control panel needs no code to arm or disarm. The integration is logged in to the module as the user you configured, so anyone who can control the entity in Home Assistant can arm and disarm that area.
 
+An arm or disarm action returns once the panel reports the area in the new state; exit delay counts as armed. Until then the integration sends the command again every 5 seconds, and after 20 seconds the action fails with `command_failed`, so the automation or script that called it stops with an error. `command_failed` does not prove that the panel ignored the command: a command that the panel applied, but that no status poll confirmed within the 20 seconds, fails too, and the area entity shows the state the panel took. A new login that the panel rejects ends the action at once with `command_failed`. `custom_components.paradox` logs each attempt at INFO and each failed attempt at WARNING.
+
 All entities keep their last state while status polls fail, become unavailable once no poll has succeeded for 30 seconds, and come back with the next poll that succeeds. Home Assistant drops an arm or disarm action sent while the entities are unavailable, with only a warning in the log.
 
 ## Troubleshooting
@@ -73,6 +75,7 @@ All entities keep their last state while status polls fail, become unavailable o
 - **`cannot_connect` or `invalid_auth`:** check that the host is reachable from Home Assistant and that the user name and password work on the module's page. After repeated failed logins the module locks for 10 minutes.
 - **Entities are unavailable while someone else uses the module's web page:** a login by either side ends the other's session. Close the page, or leave it alone until the integration has logged in again.
 - **Entities are unavailable while nobody uses the web page:** the module sometimes ignores new connections for a few seconds. The integration gives up on a connection that is not open after 2 seconds and waits for the next poll, and the entities keep their last state through that. Unavailable entities mean that the polls have failed for 30 seconds or more. A new login follows only after the polls have gone unanswered for 60 seconds, so that a short stall does not end anyone's session. The `Failed requests` sensor shows how often the module did not answer.
+- **Arming fails with `command_failed` after 20 seconds:** the panel refuses to arm while a zone is open, so no status poll shows the area armed.
 - **Diagnostics:** on **Settings → Devices & services**, open **Paradox**, then use the menu of the entry and choose **Download diagnostics**. The file holds the entry, the zone, area and trouble names the panel reported, and the current status. The user name and password are removed, but the host is not, so look through the file before you share it.
 
 ## Removal

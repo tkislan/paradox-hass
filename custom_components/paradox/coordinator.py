@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import TYPE_CHECKING
 
@@ -6,6 +7,9 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    COMMAND_ATTEMPT_WINDOW,
+    COMMAND_CHECK_INTERVAL,
+    COMMAND_DEADLINE,
     DOMAIN,
     LOGGER,
     POLL_INTERVAL,
@@ -19,7 +23,7 @@ from .panel.errors import (
     ParadoxConnectionError,
     ParadoxError,
 )
-from .panel.models import PanelLayout, PanelStatus
+from .panel.models import CONFIRMED_AREA_CODES, PanelLayout, PanelStatus
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -27,8 +31,13 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
     from .panel.client import ParadoxClient
+    from .panel.models import PanelCommand
 
 type ParadoxConfigEntry = ConfigEntry[ParadoxCoordinator]
+
+
+class CommandNotConfirmedError(ParadoxError):
+    """No status poll showed the area in the commanded state before the deadline."""
 
 
 class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
@@ -57,6 +66,7 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
         # those must not make the entities available again. last_update_success
         # cannot serve as this flag, because a cancelled refresh also clears it.
         self._login_rejected = False
+        self._good_polls = 0
 
     async def _async_setup(self) -> None:
         try:
@@ -94,7 +104,103 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
         self._unanswered_since = None
         self._last_good_poll_at = time.monotonic()
         self._login_rejected = False
+        self._good_polls += 1
         return status
+
+    async def async_send_command(self, area: int, command: PanelCommand) -> None:
+        """
+        Send ``command`` to the 0-based ``area`` until a status poll confirms it.
+
+        Returns once a good poll that ended after a command request shows the area in
+        one of ``CONFIRMED_AREA_CODES[command]``. The command is sent again
+        ``COMMAND_ATTEMPT_WINDOW`` after each attempt started, and none is sent once
+        ``COMMAND_DEADLINE`` has passed since the call. At the deadline it raises the
+        last attempt's request error, or ``CommandNotConfirmedError`` when the panel
+        answered that request or the deadline cut it off. Raises ``ParadoxAuthError``
+        at once when a poll ends in a new login that the panel rejects, and
+        ``ParadoxClosedError`` once the client is closed.
+        """
+        label = f"Command {command.name.lower()} for area {area + 1}"
+        deadline = time.monotonic() + COMMAND_DEADLINE
+        attempt = 0
+        failure: ParadoxError | None = None
+        try:
+            async with asyncio.timeout(COMMAND_DEADLINE):
+                while True:
+                    attempt += 1
+                    attempt_started = time.monotonic()
+                    # Cleared first: an attempt that the deadline cuts off leaves no
+                    # error behind.
+                    failure = None
+                    failure = await self._async_send_attempt(
+                        area, command, label, attempt
+                    )
+                    good_before = self._good_polls
+                    # Cancelling the refresh would make every entity unavailable, and
+                    # Home Assistant would drop the next service call.
+                    read = self.config_entry.async_create_background_task(
+                        self.hass, self.async_refresh(), "paradox command status read"
+                    )
+                    await asyncio.wait({read})
+                    while True:
+                        # No new login may start within 60 s of the rejected one and
+                        # Home Assistant has stopped the timed polls, so no later
+                        # attempt can be confirmed, and every retry would only lead
+                        # to more rejected logins.
+                        if self._login_rejected:
+                            LOGGER.warning(
+                                "%s: stopped after attempt %d: "
+                                "the panel rejected the login",
+                                label,
+                                attempt,
+                            )
+                            raise ParadoxAuthError("the panel rejected the login")
+                        if (
+                            self._good_polls > good_before
+                            and self.data.area_code(area)
+                            in CONFIRMED_AREA_CODES[command]
+                        ):
+                            LOGGER.info(
+                                "%s: confirmed after attempt %d", label, attempt
+                            )
+                            return
+                        left = (
+                            attempt_started + COMMAND_ATTEMPT_WINDOW - time.monotonic()
+                        )
+                        if left <= 0:
+                            break
+                        await asyncio.sleep(min(COMMAND_CHECK_INTERVAL, left))
+                    # The sleep that ends the last attempt window can wake before the
+                    # timeout's callback runs, which would start a fifth attempt.
+                    # Under the tests' frozen clock both are due together and the
+                    # timeout always runs first, so no test reaches this.
+                    if time.monotonic() >= deadline:  # pragma: no cover
+                        break
+        except TimeoutError:
+            pass
+        LOGGER.warning(
+            "%s: not confirmed within %.0f s after %d attempts",
+            label,
+            COMMAND_DEADLINE,
+            attempt,
+        )
+        raise failure or CommandNotConfirmedError(
+            f"the area did not reach the new state within {COMMAND_DEADLINE:.0f} s"
+        )
+
+    async def _async_send_attempt(
+        self, area: int, command: PanelCommand, label: str, attempt: int
+    ) -> ParadoxError | None:
+        """Send one command request, log how it ended, and return its error."""
+        try:
+            await self.client.async_command(area, command)
+        except ParadoxClosedError:
+            raise
+        except ParadoxError as err:
+            LOGGER.warning("%s, attempt %d: failed: %s", label, attempt, err)
+            return err
+        LOGGER.info("%s, attempt %d: sent", label, attempt)
+        return None
 
     async def _async_recover(self, err: ParadoxError) -> PanelStatus:
         """

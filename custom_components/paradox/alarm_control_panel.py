@@ -106,11 +106,10 @@ class ParadoxAreaPanel(ParadoxEntity, AlarmControlPanelEntity):
 
     async def _async_send(self, command: PanelCommand) -> None:
         try:
-            await self.coordinator.client.async_command(self._index, command)
+            await self.coordinator.async_send_command(self._index, command)
         except ParadoxError as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="command_failed",
                 translation_placeholders={"area": str(self.name), "reason": str(err)},
             ) from err
-        await self.coordinator.async_request_refresh()

@@ -59,14 +59,23 @@ ROW_WITH_EVERY_CHECK: Final = {
             },
         },
         {
-            "panel_fault": {"path": "/statuslive.html", "kind": "http_500", "times": 1},
-            "action": {"service": "alarm_disarm", "area": 0},
+            "panel_down": True,
+            "action": {"service": "alarm_disarm", "area": 0, "advance_s": 20},
             "expect": {
                 "action_error": "command_failed",
-                "panel_requests": [ARM[:-1] + "d"],
+                "states": {"area_0": "armed_away"},
+                # Attempts at 3, 8, 13 and 18 s after the setup, a poll every second
+                # from 4 to 23 s and after each command, keep-alives at 6, 9, 12, 15,
+                # 18 and 21 s, and every request sent twice.
+                "panel_request_counts": {
+                    ARM[:-1] + "d": 8,
+                    STATUS: 48,
+                    KEEP_ALIVE: 12,
+                },
             },
         },
         {
+            "panel_down": False,
             "advance_s": 3,
             "expect": {"panel_request_counts": {STATUS: 3, KEEP_ALIVE: 1}},
         },
@@ -317,7 +326,7 @@ def seconds_ahead_at_polls(panel: FakePanel) -> list[float]:
     """
     Return a list that fills with the seconds ``dt_util.utcnow`` is ahead per request.
 
-    A request is any one for ``/statuslive.html``, the arm command's included.
+    A request is any one for ``/statuslive.html``, the disarm command's included.
     """
     unshifted = dt_util.utcnow
     seen: list[float] = []
@@ -347,10 +356,10 @@ async def test_wall_clock_steps_shift_utcnow_and_add_up_over_steps(
                 "expect": {"panel_requests": [STATUS]},
             },
             {
-                "action": {"service": "alarm_arm_away", "area": 0},
+                "action": {"service": "alarm_disarm", "area": 0},
                 "wall_clock_step_s": 3600,
                 "advance_s": 1,
-                "expect": {"panel_requests": [ARM, STATUS, STATUS]},
+                "expect": {"panel_requests": [ARM[:-1] + "d", STATUS, STATUS]},
             },
             {
                 "advance_s": 1,
