@@ -45,6 +45,11 @@
       "trouble": {
         "name": "Trouble"
       }
+    },
+    "sensor": {
+      "failed_requests": {
+        "name": "Failed requests"
+      }
     }
   },
   "exceptions": {

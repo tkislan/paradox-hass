@@ -6,7 +6,8 @@ It gives you:
 
 - an alarm control panel for each area, to arm away, arm home, arm night and disarm;
 - a motion sensor for each zone in use;
-- a diagnostic sensor that is on while the panel reports a trouble.
+- a diagnostic sensor that is on while the panel reports a trouble;
+- a diagnostic sensor that counts the requests the module did not answer or answered with an HTTP error.
 
 It is a port of the Node.js bridge [tkislan/paradox](https://github.com/tkislan/paradox).
 
@@ -60,6 +61,7 @@ Everything belongs to one device, **Paradox**, which links to the module's web p
 | Motion binary sensor | each zone in use | On while the panel reports the zone as open, in alarm, or open with a trouble or an alarm memory. |
 | Alarm control panel | each area in use | Disarmed (also while the panel is ready or not ready), armed away, armed home, armed night, arming, pending or triggered. Unknown for a state the integration does not know. |
 | `Trouble` binary sensor (diagnostic) | the panel | On while the panel reports any trouble. The attribute `troubles` lists their names. |
+| `Failed requests` sensor (diagnostic) | the panel | The number of module requests that got no answer or an HTTP error. It starts at 0 each time the entry loads, includes the requests of that setup, and stays available while the other entities are unavailable. |
 
 An alarm control panel needs no code to arm or disarm. The integration is logged in to the module as the user you configured, so anyone who can control the entity in Home Assistant can arm and disarm that area.
 

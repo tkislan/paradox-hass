@@ -443,6 +443,73 @@ async def test_status_300_is_an_http_error(
     assert caught.value.status == 300
 
 
+@pytest.mark.usefixtures("fast_timing")
+async def test_connect_timeout_counts_one_failed_request(unopened_host: str) -> None:
+    async with aiohttp.ClientSession() as session:
+        panel_client = ParadoxClient(session, unopened_host, "user", "1234")
+        with pytest.raises(ParadoxConnectionError):
+            await panel_client.async_get_status()
+
+    assert panel_client.failed_requests == 1
+
+
+@pytest.mark.parametrize(
+    ("answer", "panel_requests"),
+    [
+        pytest.param(FakeResponse(status=500, body="boom"), 1, id="HTTP 500"),
+        pytest.param(Reset(), 2, id="reset that aiohttp resends"),
+    ],
+)
+async def test_failed_request_counts_once(
+    fake_panel: FakePanel,
+    client: ParadoxClient,
+    answer: PanelResult,
+    panel_requests: int,
+) -> None:
+    fake_panel.respond_with("/statuslive.html", answer)
+
+    with pytest.raises(ParadoxError):
+        await client.async_get_status()
+
+    assert client.failed_requests == 1
+    assert len(fake_panel.requests) == panel_requests
+
+
+async def test_answered_login_page_is_no_failed_request(
+    fake_panel: FakePanel, client: ParadoxClient
+) -> None:
+    fake_panel.respond_with(
+        "/statuslive.html",
+        FakeResponse(body=spec_text({"file": "data/login_page.html"})),
+    )
+
+    with pytest.raises(ParadoxPageError):
+        await client.async_get_status()
+
+    assert client.failed_requests == 0
+
+
+async def test_failure_listener_is_called_once_per_failed_request_until_removed(
+    fake_panel: FakePanel, client: ParadoxClient
+) -> None:
+    fake_panel.respond_with("/statuslive.html", Reset())
+    counts_seen: list[int] = []
+    remove = client.add_failure_listener(
+        lambda: counts_seen.append(client.failed_requests)
+    )
+
+    await client.async_keep_alive()
+    for _ in range(2):
+        with pytest.raises(ParadoxConnectionError):
+            await client.async_get_status()
+    remove()
+    with pytest.raises(ParadoxConnectionError):
+        await client.async_get_status()
+
+    assert counts_seen == [1, 2]
+    assert client.failed_requests == 3
+
+
 # hex fails to decode with a LookupError, undefined with a UnicodeError.
 @pytest.mark.parametrize("charset", ["hex", "undefined"])
 async def test_status_page_declaring_a_charset_that_is_no_text_codec_is_parsed(
