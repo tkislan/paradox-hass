@@ -251,7 +251,7 @@ async def test_failure_59_s_after_a_login_started_sends_no_login_and_60_s_after_
     panel.respond_with("/statuslive.html", HTTP_500, times=1)
     await tick(hass, freezer)
 
-    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "unavailable")
+    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "off")
     assert len(panel.requests_to("/login_page.html")) == 2
 
     panel.respond_with("/statuslive.html", HTTP_500, times=1)
@@ -281,7 +281,7 @@ async def test_new_login_that_fails_counts_for_the_60_s_rule(
     await tick(hass, freezer)
 
     assert panel.request_lines[seen:] == [STATUS, LOGOUT, "GET /login_page.html"]
-    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "unavailable")
+    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "off")
 
     await tick(hass, freezer)
 
@@ -309,7 +309,7 @@ async def test_hanging_poll_blocks_polls_and_keep_alives_until_its_deadline(
     await advance(hass, freezer, 1)
     await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "unavailable")
+    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "off")
     await tick(hass, freezer)
 
     assert timeline(panel, seen, started) == [
@@ -332,7 +332,8 @@ async def test_hanging_status_page_is_polled_every_21_s_and_logged_in_again_at_8
     arrived = hang_every_request(panel, "/statuslive.html")
 
     # Polls go out at 1, 22 and 43 s and fail 20 s later, at 21, 42 and 63 s; the
-    # failure at 21 s starts the 60 s count.
+    # failure at 21 s starts the 60 s count, and the one at 42 s, the first 30 s or
+    # more after the setup's poll, makes the entities unavailable.
     for _ in range(3):
         await advance(hass, freezer, 1)
         await arrived.wait()

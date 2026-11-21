@@ -15,6 +15,7 @@ from homeassistant.core import Event, callback
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.paradox.const import DOMAIN
@@ -56,6 +57,9 @@ ZONE_ENTITY_IDS: Final = (
     "binary_sensor.paradox_obyvacka",
     "binary_sensor.paradox_chodba",
 )
+AREA_0: Final = "alarm_control_panel.paradox_cast_1"
+LAST_STATES: Final = {**dict.fromkeys(ZONE_ENTITY_IDS, "off"), AREA_0: "disarmed"}
+ALL_UNAVAILABLE: Final = dict.fromkeys((*ZONE_ENTITY_IDS, AREA_0), "unavailable")
 SLOT_0_OPEN: Final = [1, *[0] * 31]
 
 
@@ -64,6 +68,16 @@ def zone_states(hass: HomeAssistant) -> dict[str, str]:
         state.entity_id: state.state
         for state in hass.states.async_all("binary_sensor")
         if state.entity_id != TROUBLE_ENTITY_ID
+    }
+
+
+def zone_and_area_states(hass: HomeAssistant) -> dict[str, str]:
+    return {
+        **zone_states(hass),
+        **{
+            state.entity_id: state.state
+            for state in hass.states.async_all("alarm_control_panel")
+        },
     }
 
 
@@ -276,7 +290,7 @@ async def test_keep_alive_still_running_when_the_next_is_due_starts_no_second_re
     assert len(panel.requests_to("/keep_alive.html")) == 2
 
 
-async def test_failed_poll_makes_zones_unavailable_until_the_next_good_poll(
+async def test_failed_poll_keeps_the_last_states_until_the_next_good_poll(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     panel: FakePanel,
@@ -292,14 +306,115 @@ async def test_failed_poll_makes_zones_unavailable_until_the_next_good_poll(
     panel.respond_with("/statuslive.html", Reset())
     await tick(hass, freezer)
 
-    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "unavailable")
-    assert tracebacks(caplog) == []
+    assert zone_states(hass) == restored
+    assert problems(caplog) == []
 
     panel.clear_overrides()
+    panel.set_status(statuszone=[1, 1, *[0] * 30])
     await tick(hass, freezer)
 
-    assert zone_states(hass) == restored
+    assert zone_states(hass) == {**restored, ZONE_ENTITY_IDS[1]: "on"}
     assert "GET /login_page.html" not in panel.request_lines[seen_at_setup:]
+
+
+async def test_polls_failing_for_30_s_make_the_entities_unavailable(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    panel.down = True
+
+    await tick(hass, freezer, 29)
+
+    assert zone_and_area_states(hass) == LAST_STATES
+
+    await tick(hass, freezer)
+
+    assert zone_and_area_states(hass) == ALL_UNAVAILABLE
+
+    panel.down = False
+    await tick(hass, freezer)
+
+    assert zone_and_area_states(hass) == LAST_STATES
+
+
+async def test_a_good_poll_restarts_the_30_s_count(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    panel.down = True
+    await tick(hass, freezer, 20)
+    panel.down = False
+    await tick(hass, freezer)
+    panel.down = True
+
+    await tick(hass, freezer, 29)
+
+    assert zone_and_area_states(hass) == LAST_STATES
+
+
+async def test_refresh_after_a_rejected_login_keeps_the_entities_unavailable(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    assert await async_setup_component(hass, "homeassistant", {})
+    await setup_entry(hass, mock_config_entry)
+    panel.credentials = {}
+    panel.expire_session()
+
+    await tick(hass, freezer)
+
+    assert zone_and_area_states(hass) == ALL_UNAVAILABLE
+    assert [
+        flow["context"]["source"] for flow in hass.config_entries.flow.async_progress()
+    ] == ["reauth"]
+
+    await tick(hass, freezer, 4)
+    await hass.services.async_call(
+        "homeassistant",
+        "update_entity",
+        {"entity_id": ZONE_ENTITY_IDS[0]},
+        blocking=True,
+    )
+
+    assert zone_and_area_states(hass) == ALL_UNAVAILABLE
+
+
+async def test_good_poll_after_a_rejected_login_lets_failed_polls_keep_the_states(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    assert await async_setup_component(hass, "homeassistant", {})
+    await setup_entry(hass, mock_config_entry)
+    accepted = panel.credentials
+    panel.credentials = {}
+    panel.expire_session()
+    await tick(hass, freezer)
+    panel.credentials = accepted
+    # The rejected login stopped the timed polls. A refresh 60 s after it may log in
+    # again, and once it does, the timed polls start again.
+    await tick(hass, freezer, 60)
+    await hass.services.async_call(
+        "homeassistant",
+        "update_entity",
+        {"entity_id": ZONE_ENTITY_IDS[0]},
+        blocking=True,
+    )
+    await tick(hass, freezer)
+    panel.down = True
+
+    await tick(hass, freezer)
+
+    assert zone_and_area_states(hass) == LAST_STATES
 
 
 async def test_unloading_the_entry_logs_the_panel_out_and_stops_all_activity(

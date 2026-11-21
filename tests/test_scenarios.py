@@ -296,7 +296,7 @@ async def test_a_panel_down_step_resets_every_request_until_the_panel_is_up(
                 "advance_s": 1,
                 "expect": {
                     "panel_requests": [STATUS, STATUS],
-                    "states": {"area_0": "unavailable"},
+                    "states": {"area_0": "disarmed"},
                 },
             },
             {

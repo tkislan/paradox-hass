@@ -12,3 +12,4 @@ POLL_INTERVAL: Final = timedelta(seconds=1)
 KEEP_ALIVE_INTERVAL: Final = timedelta(seconds=3)
 RELOGIN_MIN_INTERVAL: Final = 60.0
 UNANSWERED_GRACE: Final = 60.0
+UNAVAILABLE_AFTER: Final = 30.0

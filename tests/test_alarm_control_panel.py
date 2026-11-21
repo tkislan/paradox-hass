@@ -244,6 +244,24 @@ async def test_state_is_polled_as_soon_as_the_command_is_accepted(
     assert alarm_states(hass) == {AREA_0: "armed_away"}
 
 
+async def test_disarm_right_after_a_failed_poll_reaches_the_panel(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    panel.set_status(useraccess=[2, 0])
+    await setup_entry(hass, mock_config_entry)
+    panel.down = True
+    await tick(hass, freezer)
+    panel.down = False
+
+    await call(hass, "alarm_disarm", AREA_0)
+
+    assert command_lines(panel) == [f"{STATUS}?area=00&value=d"]
+    assert alarm_states(hass) == {AREA_0: "disarmed"}
+
+
 @pytest.mark.parametrize(("answer", "times", "cause", "reason"), FAILURES)
 async def test_failed_command_raises_command_failed_and_polling_continues(
     hass: HomeAssistant,

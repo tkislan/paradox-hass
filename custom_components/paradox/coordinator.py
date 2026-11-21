@@ -5,7 +5,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, LOGGER, POLL_INTERVAL, RELOGIN_MIN_INTERVAL, UNANSWERED_GRACE
+from .const import (
+    DOMAIN,
+    LOGGER,
+    POLL_INTERVAL,
+    RELOGIN_MIN_INTERVAL,
+    UNANSWERED_GRACE,
+    UNAVAILABLE_AFTER,
+)
 from .panel.errors import (
     ParadoxAuthError,
     ParadoxClosedError,
@@ -41,9 +48,15 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
         )
         self.client = client
         self._keep_alive_running = False
-        # Monotonic readings: a change to the system time must not move either count.
+        # Monotonic readings: a change to the system time must not move any count.
         self._last_login_started: float | None = None
         self._unanswered_since: float | None = None
+        self._last_good_poll_at: float | None = None
+        # Home Assistant stops the timed polls after a rejected login but still runs
+        # the refreshes that a command or homeassistant.update_entity asks for, and
+        # those must not make the entities available again. last_update_success
+        # cannot serve as this flag, because a cancelled refresh also clears it.
+        self._login_rejected = False
 
     async def _async_setup(self) -> None:
         try:
@@ -64,8 +77,23 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
                 raise UpdateFailed(str(err)) from err
             return self.data
         except ParadoxError as err:
-            return await self._async_recover(err)
+            try:
+                return await self._async_recover(err)
+            except ConfigEntryAuthFailed:
+                self._login_rejected = True
+                raise
+            except UpdateFailed:
+                if (
+                    self._login_rejected
+                    or self._last_good_poll_at is None
+                    or time.monotonic() - self._last_good_poll_at >= UNAVAILABLE_AFTER
+                ):
+                    raise
+                LOGGER.debug("Keeping the last status after a failed poll: %s", err)
+                return self.data
         self._unanswered_since = None
+        self._last_good_poll_at = time.monotonic()
+        self._login_rejected = False
         return status
 
     async def _async_recover(self, err: ParadoxError) -> PanelStatus:
