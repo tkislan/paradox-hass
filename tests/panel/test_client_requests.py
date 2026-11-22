@@ -453,11 +453,13 @@ async def test_connect_timeout_counts_one_failed_request(unopened_host: str) -> 
     assert panel_client.failed_requests == 1
 
 
+@pytest.mark.usefixtures("fast_timing")
 @pytest.mark.parametrize(
     ("answer", "panel_requests"),
     [
         pytest.param(FakeResponse(status=500, body="boom"), 1, id="HTTP 500"),
         pytest.param(Reset(), 2, id="reset that aiohttp resends"),
+        pytest.param(Hang(), 1, id="no answer within the deadline"),
     ],
 )
 async def test_failed_request_counts_once(
@@ -499,9 +501,10 @@ async def test_failure_listener_is_called_once_per_failed_request_until_removed(
     )
 
     await client.async_keep_alive()
-    for _ in range(2):
-        with pytest.raises(ParadoxConnectionError):
-            await client.async_get_status()
+    with pytest.raises(ParadoxConnectionError):
+        await client.async_get_status()
+    with pytest.raises(ParadoxConnectionError):
+        await client.async_get_status()
     remove()
     with pytest.raises(ParadoxConnectionError):
         await client.async_get_status()

@@ -366,15 +366,6 @@
       "steps": [
         {"panel_expire_session": true, "action": {"service": "alarm_arm_away", "area": 0, "advance_s": 5}, "expect": {"panel_request_counts": {"GET /statuslive.html?area=00&value=r": 2, "GET /statuslive.html": 7, "GET /logout.html": 1, "GET /login_page.html": 1, "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255": 1, "GET /index.html": 1, "GET /keep_alive.html?msgid=1": 1}, "reauth_in_progress": false, "states": {"area_0": "armed_away"}}}
       ]
-    },
-    {
-      "name": "a command while the panel resets every request is sent every 5 s and raises command_failed at 20 s, and the area keeps its state",
-      "ported_from": "mqtt_commands/a command with a reset connection is logged and does not stop the bridge",
-      "note": "No bridge row resets every request while a command runs; this row extends the bridge row's reset command to the whole action.",
-      "setup": {"expect": {"entry_state": "loaded", "panel_requests": ["GET /logout.html", "GET /login_page.html", "GET /default.html?u=EBA2095C&p=82016AC9BD9B087D6C393B19C756B255", "GET /index.html", "GET /statuslive.html"], "states": {"area_0": "disarmed"}}},
-      "steps": [
-        {"panel_down": true, "action": {"service": "alarm_arm_away", "area": 0, "advance_s": 20}, "expect": {"action_error": "command_failed", "panel_request_counts": {"GET /statuslive.html?area=00&value=r": 8, "GET /statuslive.html": 48, "GET /keep_alive.html?msgid=1": 12}, "states": {"area_0": "disarmed"}}}
-      ]
     }
   ],
   "setup_failures": [

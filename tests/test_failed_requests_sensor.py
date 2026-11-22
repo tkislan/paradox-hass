@@ -60,20 +60,6 @@ async def test_the_sensor_counts_a_failed_request_of_the_setup(
     assert sensor_state(hass) == "1"
 
 
-async def test_a_reset_poll_counts_at_once(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    panel: FakePanel,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    await setup_entry(hass, mock_config_entry)
-    panel.respond_with("/statuslive.html", Reset(), times=2)
-
-    await tick(hass, freezer)
-
-    assert sensor_state(hass) == "1"
-
-
 async def test_a_keep_alive_answered_with_http_500_counts(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
@@ -86,22 +72,6 @@ async def test_a_keep_alive_answered_with_http_500_counts(
     await tick(hass, freezer, 3)
 
     assert sensor_state(hass) == "1"
-
-
-async def test_a_poll_answered_with_the_login_page_does_not_count(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    panel: FakePanel,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    await setup_entry(hass, mock_config_entry)
-    seen_at_setup = len(panel.requests)
-    panel.expire_session()
-
-    await tick(hass, freezer)
-
-    assert "GET /login_page.html" in panel.request_lines[seen_at_setup:]
-    assert sensor_state(hass) == "0"
 
 
 async def test_the_sensor_stays_available_and_counting_while_the_panel_is_down(

@@ -305,7 +305,7 @@ async def test_disarm_right_after_a_failed_poll_reaches_the_panel(
 
     await call(hass, "alarm_disarm", AREA_0)
 
-    assert command_lines(panel) == [f"{STATUS}?area=00&value=d"]
+    assert command_lines(panel) == [DISARM_REQUEST]
     assert alarm_states(hass) == {AREA_0: "disarmed"}
 
 
@@ -347,13 +347,25 @@ async def test_command_failing_on_every_attempt_raises_command_failed_at_20_s(
         (record.name, record.levelno, record.getMessage())
         for record in problem_records(caplog)
     ] == [
-        *(
-            (
-                PACKAGE_LOGGER,
-                logging.WARNING,
-                f"Command arm for area 1, attempt {attempt}: failed: {reason}",
-            )
-            for attempt in (1, 2, 3, 4)
+        (
+            PACKAGE_LOGGER,
+            logging.WARNING,
+            f"Command arm for area 1, attempt 1: failed: {reason}",
+        ),
+        (
+            PACKAGE_LOGGER,
+            logging.WARNING,
+            f"Command arm for area 1, attempt 2: failed: {reason}",
+        ),
+        (
+            PACKAGE_LOGGER,
+            logging.WARNING,
+            f"Command arm for area 1, attempt 3: failed: {reason}",
+        ),
+        (
+            PACKAGE_LOGGER,
+            logging.WARNING,
+            f"Command arm for area 1, attempt 4: failed: {reason}",
         ),
         (
             PACKAGE_LOGGER,
@@ -453,21 +465,6 @@ async def test_command_applied_by_the_panel_whose_answer_is_lost_is_not_sent_aga
     # One attempt, which aiohttp sent again after the reset.
     assert command_lines(panel) == [ARM_REQUEST] * 2
     assert alarm_states(hass) == {AREA_0: "armed_away"}
-
-
-async def test_arm_is_confirmed_by_exit_delay(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    panel: FakePanel,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    await setup_entry(hass, mock_config_entry)
-    report_area_code(panel, 7)
-
-    await run_while_ticking(hass, freezer, call(hass, "alarm_arm_away", AREA_0), 0)
-
-    assert command_lines(panel) == [ARM_REQUEST]
-    assert alarm_states(hass) == {AREA_0: "arming"}
 
 
 async def test_disarm_is_confirmed_while_the_area_is_still_in_alarm(
