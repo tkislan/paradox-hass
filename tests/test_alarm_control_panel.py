@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Final
 
 import pytest
 from homeassistant.components.alarm_control_panel.const import (
+    DATA_COMPONENT,
     AlarmControlPanelEntityFeature,
 )
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
@@ -389,8 +390,7 @@ async def test_command_failure_message_names_the_area_and_the_cause(
         await run_while_ticking(hass, freezer, call(hass, "alarm_disarm", AREA_0), 20)
 
     assert str(raised.value) == (
-        "The panel did not accept the command for Cast 1: "
-        "Request failed with status code 500"
+        "The command for Cast 1 failed: Request failed with status code 500"
     )
 
 
@@ -678,11 +678,49 @@ async def test_command_meeting_a_rejected_login_fails_at_once_with_the_area_unav
     ]
 
 
+async def test_command_queued_during_a_rejected_login_leaves_the_timed_polls_stopped(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    panel.credentials = {}
+    panel.expire_session()
+    coordinator = mock_config_entry.runtime_data
+    commands: list[asyncio.Task[None]] = []
+
+    def start_command(_request: PanelRequest) -> PanelResult:
+        commands.append(
+            asyncio.get_running_loop().create_task(
+                coordinator.async_send_command(0, PanelCommand.ARM)
+            )
+        )
+        return FakeResponse(body=render_login_page(panel.session_value))
+
+    panel.respond_with("/login_page.html", start_command, times=1)
+
+    await tick(hass, freezer)
+    (command,) = commands
+    try:
+        await settle(hass, command)
+        assert command.done()
+        with pytest.raises(ParadoxAuthError, match=r"^the panel rejected the login$"):
+            await command
+    finally:
+        command.cancel()
+    seen = len(panel.requests)
+    await tick(hass, freezer, 62)
+
+    assert set(panel.request_lines[seen:]) <= {"GET /keep_alive.html?msgid=1"}
+
+
 async def test_command_request_hanging_at_the_deadline_ends_the_command_at_20_s(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     panel: FakePanel,
     mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     await setup_entry(hass, mock_config_entry)
     arrived = asyncio.Event()
@@ -713,6 +751,12 @@ async def test_command_request_hanging_at_the_deadline_ends_the_command_at_20_s(
         task.cancel()
 
     assert command_lines(panel) == [ARM_REQUEST] * 2
+    last = problem_records(caplog)[-1]
+    assert (last.name, last.levelno, last.getMessage()) == (
+        PACKAGE_LOGGER,
+        logging.WARNING,
+        "Command arm for area 1: not confirmed within 20 s after 2 attempts",
+    )
 
 
 async def test_status_read_hanging_at_20_s_ends_a_command_and_keeps_entities_available(
@@ -757,6 +801,67 @@ async def test_status_read_hanging_at_20_s_ends_a_command_and_keeps_entities_ava
 
     assert command_lines(panel) == [ARM_REQUEST] * 2
     assert coordinator.last_update_success
+
+
+async def test_action_for_one_area_does_not_wait_for_an_unconfirmed_action_for_another(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    panel.set_status(useraccess=[1, 2])
+    await setup_entry(hass, mock_config_entry)
+    panel.respond_with(
+        "/statuslive.html",
+        FakeResponse(body="<html></html>"),
+        when=lambda request: request.query.get("area") == "00",
+    )
+
+    arm = asyncio.create_task(call(hass, "alarm_arm_away", AREA_0))
+    try:
+        await settle(hass, arm)
+        await run_while_ticking(hass, freezer, call(hass, "alarm_disarm", AREA_1), 0)
+        assert not arm.done()
+    finally:
+        arm.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST, f"{STATUS}?area=01&value=d"]
+
+
+async def test_actions_for_one_area_reach_the_panel_in_call_order(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    panel.respond_with(
+        "/statuslive.html", FakeResponse(body="<html></html>"), times=1, when=is_command
+    )
+    entity = hass.data[DATA_COMPONENT].get_entity(AREA_0)
+    assert entity is not None
+
+    arm = asyncio.create_task(call(hass, "alarm_arm_away", AREA_0))
+    disarm: asyncio.Task[None] | None = None
+    try:
+        await settle(hass, arm)
+        # Called directly: the task in which Home Assistant runs a service call would
+        # wait on the area's lock, and settle fails on a task that waits for anything
+        # but the clock.
+        disarm = asyncio.create_task(entity.async_alarm_disarm())
+        await tick_during(hass, freezer, arm, 5)
+        await settle(hass, disarm)
+        assert arm.done()
+        assert disarm.done()
+        await arm
+        await disarm
+    finally:
+        arm.cancel()
+        if disarm is not None:
+            disarm.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST, ARM_REQUEST, DISARM_REQUEST]
+    assert alarm_states(hass) == {AREA_0: "disarmed"}
 
 
 async def test_alarm_reported_by_the_panel_makes_the_area_triggered(

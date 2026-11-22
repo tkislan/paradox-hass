@@ -62,8 +62,9 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
         self._unanswered_since: float | None = None
         self._last_good_poll_at: float | None = None
         # Home Assistant stops the timed polls after a rejected login but still runs
-        # the refreshes that a command or homeassistant.update_entity asks for, and
-        # those must not make the entities available again. last_update_success
+        # the refreshes that a command or homeassistant.update_entity asks for. Until
+        # a poll or a new login succeeds, those must neither make the entities
+        # available again nor start the timed polls again. last_update_success
         # cannot serve as this flag, because a cancelled refresh also clears it.
         self._login_rejected = False
         self._good_polls = 0
@@ -88,19 +89,24 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
             return self.data
         except ParadoxError as err:
             try:
-                return await self._async_recover(err)
+                recovered = await self._async_recover(err)
             except ConfigEntryAuthFailed:
                 self._login_rejected = True
                 raise
-            except UpdateFailed:
+            except UpdateFailed as update_err:
+                # UpdateFailed would make Home Assistant start the timed polls again,
+                # and they would log in again 60 s later and be rejected again.
+                if self._login_rejected:
+                    raise ConfigEntryAuthFailed from update_err
                 if (
-                    self._login_rejected
-                    or self._last_good_poll_at is None
+                    self._last_good_poll_at is None
                     or time.monotonic() - self._last_good_poll_at >= UNAVAILABLE_AFTER
                 ):
                     raise
                 LOGGER.debug("Keeping the last status after a failed poll: %s", err)
                 return self.data
+            self._login_rejected = False
+            return recovered
         self._unanswered_since = None
         self._last_good_poll_at = time.monotonic()
         self._login_rejected = False

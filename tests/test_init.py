@@ -417,6 +417,37 @@ async def test_good_poll_after_a_rejected_login_lets_failed_polls_keep_the_state
     assert zone_and_area_states(hass) == LAST_STATES
 
 
+async def test_new_login_after_a_rejected_one_keeps_the_timed_polls_through_failures(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    assert await async_setup_component(hass, "homeassistant", {})
+    await setup_entry(hass, mock_config_entry)
+    accepted = panel.credentials
+    panel.credentials = {}
+    panel.expire_session()
+    await tick(hass, freezer)
+    panel.credentials = accepted
+    await tick(hass, freezer, 60)
+    await hass.services.async_call(
+        "homeassistant",
+        "update_entity",
+        {"entity_id": ZONE_ENTITY_IDS[0]},
+        blocking=True,
+    )
+    panel.down = True
+
+    polled = []
+    for _ in range(3):
+        seen = len(panel.requests)
+        await tick(hass, freezer)
+        polled.append(STATUS in panel.request_lines[seen:])
+
+    assert polled == [True, True, True]
+
+
 async def test_unloading_the_entry_logs_the_panel_out_and_stops_all_activity(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
