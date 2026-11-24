@@ -9,7 +9,9 @@ package = false
 
 [dependency-groups]
 dev = [
-    "pytest-homeassistant-custom-component==0.13.375",
+    "pytest-homeassistant==2026.11.3",
+    "pytest-cov==7.1.0",
+    "pytest-timeout==2.4.0",
     "ruff==0.17.6",
     "mypy==2.4.1",
 ]
@@ -19,7 +21,8 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 empty_parameter_set_mark = "fail_at_collect"
 testpaths = ["tests"]
-addopts = "--timeout=30 --cov=custom_components.paradox --cov-branch --cov-report=term-missing --cov-fail-under=95"
+# respx's plugin imports httpx, and Home Assistant must alias httpx before that.
+addopts = "-p no:respx --timeout=30 --cov=custom_components.paradox --cov-branch --cov-report=term-missing --cov-fail-under=95"
 
 [tool.ruff]
 target-version = "py314"

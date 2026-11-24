@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 from homeassistant.helpers.update_coordinator import UpdateFailed
-from pytest_homeassistant_custom_component.components.diagnostics import (
+from pytest_homeassistant.components.diagnostics import (
     get_diagnostics_for_config_entry,
 )
 
@@ -10,8 +10,8 @@ from tests.helpers import setup_entry
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-    from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
+    from pytest_homeassistant.common import MockConfigEntry
+    from pytest_homeassistant.typing import ClientSessionGenerator
 
     from tests.fake_panel import FakePanel
 

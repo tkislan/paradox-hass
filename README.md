@@ -16,7 +16,7 @@ It is a port of the Node.js bridge [tkislan/paradox](https://github.com/tkislan/
 - IP100 and IP150 web modules with firmware below 4.x.
 - IP150 firmware 5.x is **not** supported. It answers the login but returns 404 for the status page, and setup stops with the error `unsupported_firmware`.
 
-Home Assistant 2026.10.0 or later is required.
+Home Assistant 2026.11.0 or later is required.
 
 ## Before you start
 
