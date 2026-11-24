@@ -1,30 +1,48 @@
+import asyncio
+import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING, Final
 
 import pytest
 from homeassistant.components.alarm_control_panel.const import (
+    DATA_COMPONENT,
     AlarmControlPanelEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.paradox.const import DOMAIN
+from custom_components.paradox.coordinator import CommandNotConfirmedError
 from custom_components.paradox.panel.errors import (
+    ParadoxAuthError,
+    ParadoxClosedError,
     ParadoxConnectionError,
     ParadoxHttpError,
     ParadoxSessionExpiredError,
 )
+from custom_components.paradox.panel.models import PanelCommand
 from tests.fake_panel import (
     FakeResponse,
+    Hang,
     PanelRequest,
     PanelResult,
     Reset,
     render_index_page,
     render_login_page,
 )
-from tests.helpers import setup_entry, tick
+from tests.helpers import (
+    advance,
+    run_while_ticking,
+    settle,
+    setup_entry,
+    tick,
+    tick_during,
+)
+from tests.logs import problem_records
 
 if TYPE_CHECKING:
     from freezegun.api import FrozenDateTimeFactory
@@ -33,11 +51,22 @@ if TYPE_CHECKING:
 
     from tests.fake_panel import FakePanel
 
+PACKAGE_LOGGER: Final = "custom_components.paradox"
 STATUS: Final = "GET /statuslive.html"
+ARM_REQUEST: Final = f"{STATUS}?area=00&value=r"
+DISARM_REQUEST: Final = f"{STATUS}?area=00&value=d"
 AREA_0: Final = "alarm_control_panel.paradox_cast_1"
 AREA_1: Final = "alarm_control_panel.paradox_cast_2"
 AREA_ENTITY_IDS: Final = (AREA_0, AREA_1)
 INDEX_AREA_NAMES: Final = 'new Array("Cast 1","Cast 2")'
+HTTP_500: Final = FakeResponse(status=500, body="error")
+NOT_CONFIRMED: Final = "the area did not reach the new state within 20 s"
+CONFIRMING_CODES: Final = {
+    "alarm_arm_away": {2, 7},
+    "alarm_arm_home": {5, 7, 10},
+    "alarm_arm_night": {4, 7},
+    "alarm_disarm": {1, 8, 9},
+}
 
 ACTIONS: Final = [
     pytest.param("alarm_arm_away", "r", 1, "disarmed", "armed_away", id="arm away"),
@@ -74,6 +103,27 @@ def is_command(request: PanelRequest) -> bool:
 
 def command_lines(panel: FakePanel) -> list[str]:
     return [line for line in panel.request_lines if "value=" in line]
+
+
+def info_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == PACKAGE_LOGGER and record.levelno == logging.INFO
+    ]
+
+
+def hang_and_signal(arrived: asyncio.Event) -> PanelResult:
+    arrived.set()
+    return Hang()
+
+
+def report_area_code(panel: FakePanel, code: int) -> None:
+    def respond(_request: PanelRequest) -> PanelResult:
+        panel.set_status(useraccess=[code, 0])
+        return FakeResponse(body="")
+
+    panel.respond_with("/statuslive.html", respond, when=is_command)
 
 
 def alarm_unique_ids(hass: HomeAssistant, entry: MockConfigEntry) -> dict[str, str]:
@@ -244,12 +294,31 @@ async def test_state_is_polled_as_soon_as_the_command_is_accepted(
     assert alarm_states(hass) == {AREA_0: "armed_away"}
 
 
-@pytest.mark.parametrize(("answer", "times", "cause", "reason"), FAILURES)
-async def test_failed_command_raises_command_failed_and_polling_continues(
+async def test_disarm_right_after_a_failed_poll_reaches_the_panel(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     panel: FakePanel,
     mock_config_entry: MockConfigEntry,
+) -> None:
+    panel.set_status(useraccess=[2, 0])
+    await setup_entry(hass, mock_config_entry)
+    panel.down = True
+    await tick(hass, freezer)
+    panel.down = False
+
+    await call(hass, "alarm_disarm", AREA_0)
+
+    assert command_lines(panel) == [DISARM_REQUEST]
+    assert alarm_states(hass) == {AREA_0: "disarmed"}
+
+
+@pytest.mark.parametrize(("answer", "times", "cause", "reason"), FAILURES)
+async def test_command_failing_on_every_attempt_raises_command_failed_at_20_s(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
     *,
     answer: PanelResult,
     times: int,
@@ -257,44 +326,682 @@ async def test_failed_command_raises_command_failed_and_polling_continues(
     reason: str,
 ) -> None:
     await setup_entry(hass, mock_config_entry)
-    seen_at_setup = len(panel.requests)
-    panel.respond_with("/statuslive.html", answer, times=times, when=is_command)
+    caplog.clear()
+    panel.respond_with("/statuslive.html", answer, when=is_command)
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "alarm_arm_away", AREA_0)
+    task = asyncio.create_task(call(hass, "alarm_arm_away", AREA_0))
+    try:
+        await tick_during(hass, freezer, task, 19)
+        assert not task.done()
+        await tick_during(hass, freezer, task, 1)
+        assert task.done()
+        with pytest.raises(HomeAssistantError) as raised:
+            await task
+    finally:
+        task.cancel()
 
     assert raised.value.translation_domain == "paradox"
     assert raised.value.translation_key == "command_failed"
     assert raised.value.translation_placeholders == {"area": "Cast 1", "reason": reason}
     assert type(raised.value.__cause__) is cause
-    command = f"{STATUS}?area=00&value=r"
-    assert panel.request_lines[seen_at_setup:] == [command] * times
+    assert command_lines(panel) == [ARM_REQUEST] * (4 * times)
     assert alarm_states(hass) == {AREA_0: "disarmed"}
-
-    await tick(hass, freezer)
-
-    assert panel.request_lines[seen_at_setup:] == [command] * times + [STATUS]
-    assert alarm_states(hass) == {AREA_0: "disarmed"}
+    assert [
+        (record.name, record.levelno, record.getMessage())
+        for record in problem_records(caplog)
+    ] == [
+        (
+            PACKAGE_LOGGER,
+            logging.WARNING,
+            f"Command arm for area 1, attempt 1: failed: {reason}",
+        ),
+        (
+            PACKAGE_LOGGER,
+            logging.WARNING,
+            f"Command arm for area 1, attempt 2: failed: {reason}",
+        ),
+        (
+            PACKAGE_LOGGER,
+            logging.WARNING,
+            f"Command arm for area 1, attempt 3: failed: {reason}",
+        ),
+        (
+            PACKAGE_LOGGER,
+            logging.WARNING,
+            f"Command arm for area 1, attempt 4: failed: {reason}",
+        ),
+        (
+            PACKAGE_LOGGER,
+            logging.WARNING,
+            "Command arm for area 1: not confirmed within 20 s after 4 attempts",
+        ),
+    ]
 
 
 async def test_command_failure_message_names_the_area_and_the_cause(
-    hass: HomeAssistant, panel: FakePanel, mock_config_entry: MockConfigEntry
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    panel.set_status(useraccess=[2, 0])
+    await setup_entry(hass, mock_config_entry)
+    panel.respond_with("/statuslive.html", HTTP_500, when=is_command)
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await run_while_ticking(hass, freezer, call(hass, "alarm_disarm", AREA_0), 20)
+
+    assert str(raised.value) == (
+        "The command for Cast 1 failed: Request failed with status code 500"
+    )
+
+
+async def test_command_failing_once_is_sent_again_5_s_later_and_confirmed(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    caplog.set_level(logging.INFO, logger=PACKAGE_LOGGER)
+    caplog.clear()
+    panel.respond_with("/statuslive.html", Reset(), times=2, when=is_command)
+
+    task = asyncio.create_task(call(hass, "alarm_arm_away", AREA_0))
+    try:
+        await tick_during(hass, freezer, task, 4)
+        assert not task.done()
+        await tick_during(hass, freezer, task, 1)
+        assert task.done()
+        await task
+    finally:
+        task.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST] * 3
+    assert alarm_states(hass) == {AREA_0: "armed_away"}
+    assert info_lines(caplog) == [
+        "Command arm for area 1, attempt 2: sent",
+        "Command arm for area 1: confirmed after attempt 2",
+    ]
+
+
+async def test_command_the_panel_answers_but_ignores_raises_at_20_s(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
 ) -> None:
     await setup_entry(hass, mock_config_entry)
     panel.respond_with(
+        "/statuslive.html", FakeResponse(body="<html></html>"), when=is_command
+    )
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await run_while_ticking(hass, freezer, call(hass, "alarm_arm_away", AREA_0), 20)
+
+    assert raised.value.translation_key == "command_failed"
+    assert raised.value.translation_placeholders == {
+        "area": "Cast 1",
+        "reason": NOT_CONFIRMED,
+    }
+    assert type(raised.value.__cause__) is CommandNotConfirmedError
+
+
+async def test_command_applied_by_the_panel_whose_answer_is_lost_is_not_sent_again(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+
+    def apply_and_reset(_request: PanelRequest) -> PanelResult:
+        panel.set_status(useraccess=[2, 0])
+        return Reset()
+
+    panel.respond_with("/statuslive.html", apply_and_reset, times=2, when=is_command)
+
+    await run_while_ticking(hass, freezer, call(hass, "alarm_arm_away", AREA_0), 0)
+
+    # One attempt, which aiohttp sent again after the reset.
+    assert command_lines(panel) == [ARM_REQUEST] * 2
+    assert alarm_states(hass) == {AREA_0: "armed_away"}
+
+
+async def test_disarm_is_confirmed_while_the_area_is_still_in_alarm(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    panel.set_status(useraccess=[2, 0], alarms=["0"])
+    await setup_entry(hass, mock_config_entry)
+
+    await run_while_ticking(hass, freezer, call(hass, "alarm_disarm", AREA_0), 0)
+
+    assert command_lines(panel) == [DISARM_REQUEST]
+    assert alarm_states(hass) == {AREA_0: "triggered"}
+
+
+@pytest.mark.parametrize(
+    ("service", "code"),
+    [
+        (service, code)
+        for service, codes in CONFIRMING_CODES.items()
+        for code in sorted(codes)
+    ],
+)
+async def test_command_is_confirmed_by_each_of_its_area_codes(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+    *,
+    service: str,
+    code: int,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    report_area_code(panel, code)
+
+    await run_while_ticking(hass, freezer, call(hass, service, AREA_0), 0)
+
+    assert len(command_lines(panel)) == 1
+
+
+@pytest.mark.parametrize(
+    ("service", "code"),
+    [
+        (service, code)
+        for service, codes in CONFIRMING_CODES.items()
+        for code in range(1, 11)
+        if code not in codes
+    ],
+)
+async def test_command_is_not_confirmed_by_any_other_area_code(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+    *,
+    service: str,
+    code: int,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    report_area_code(panel, code)
+
+    task = asyncio.create_task(call(hass, service, AREA_0))
+    try:
+        await settle(hass, task)
+
+        assert not task.done()
+    finally:
+        task.cancel()
+
+
+async def test_command_confirmed_by_a_later_timed_poll_is_not_sent_again(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    caplog.set_level(logging.INFO, logger=PACKAGE_LOGGER)
+    caplog.clear()
+    panel.respond_with(
+        "/statuslive.html", FakeResponse(body=""), times=1, when=is_command
+    )
+
+    task = asyncio.create_task(call(hass, "alarm_arm_away", AREA_0))
+    try:
+        await tick_during(hass, freezer, task, 1)
+        assert not task.done()
+        assert command_lines(panel) == [ARM_REQUEST]
+        panel.set_status(useraccess=[7, 0])
+        # The poll at 2 s shows exit delay, and the check at 3 s sees it.
+        await tick_during(hass, freezer, task, 2)
+        assert task.done()
+        await task
+    finally:
+        task.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST]
+    assert alarm_states(hass) == {AREA_0: "arming"}
+    assert info_lines(caplog) == [
+        "Command arm for area 1, attempt 1: sent",
+        "Command arm for area 1: confirmed after attempt 1",
+    ]
+
+
+async def test_status_kept_after_a_failed_poll_does_not_confirm_a_command(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    caplog.set_level(logging.INFO, logger=PACKAGE_LOGGER)
+    caplog.clear()
+    seen_at_setup = len(panel.requests)
+    panel.down = True
+
+    task = asyncio.create_task(call(hass, "alarm_disarm", AREA_0))
+    try:
+        await settle(hass, task)
+        assert (
+            panel.request_lines[seen_at_setup:] == [DISARM_REQUEST] * 2 + [STATUS] * 2
+        )
+        assert alarm_states(hass) == {AREA_0: "disarmed"}
+        assert not task.done()
+        panel.down = False
+        await tick_during(hass, freezer, task, 3)
+        assert task.done()
+        await task
+    finally:
+        task.cancel()
+
+    assert command_lines(panel) == [DISARM_REQUEST] * 2
+    assert alarm_states(hass) == {AREA_0: "disarmed"}
+    assert info_lines(caplog) == [
+        "Command disarm for area 1: confirmed after attempt 1"
+    ]
+
+
+async def test_command_retrying_when_the_entry_unloads_ends_with_command_failed(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    panel.respond_with("/statuslive.html", HTTP_500, when=is_command)
+
+    task = asyncio.create_task(call(hass, "alarm_arm_away", AREA_0))
+    try:
+        await tick_during(hass, freezer, task, 2)
+        assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+        # The next attempt is due 5 s into the action.
+        await tick_during(hass, freezer, task, 3)
+        assert task.done()
+        with pytest.raises(HomeAssistantError) as raised:
+            await task
+    finally:
+        task.cancel()
+
+    assert raised.value.translation_key == "command_failed"
+    assert type(raised.value.__cause__) is ParadoxClosedError
+    assert command_lines(panel) == [ARM_REQUEST]
+    await tick(hass, freezer, 5)
+    assert panel.request_lines[-1] == "GET /logout.html"
+
+
+async def test_command_meeting_a_rejected_login_fails_at_once_with_the_area_unavailable(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    panel.credentials = {}
+    panel.expire_session()
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await run_while_ticking(hass, freezer, call(hass, "alarm_arm_away", AREA_0), 0)
+
+    assert raised.value.translation_key == "command_failed"
+    assert raised.value.translation_placeholders == {
+        "area": "Cast 1",
+        "reason": "the panel rejected the login",
+    }
+    assert type(raised.value.__cause__) is ParadoxAuthError
+    assert command_lines(panel) == [ARM_REQUEST]
+    assert mock_config_entry.async_get_active_flows(hass, {SOURCE_REAUTH})
+    assert {
+        state.state
+        for state in hass.states.async_all(("alarm_control_panel", "binary_sensor"))
+    } == {"unavailable"}
+    warnings = [
+        record.getMessage()
+        for record in problem_records(caplog)
+        if record.name == PACKAGE_LOGGER and record.levelno == logging.WARNING
+    ]
+    assert warnings == [
+        (
+            "Command arm for area 1, attempt 1: failed: "
+            "Command answered with the login page"
+        ),
+        (
+            "Command arm for area 1: stopped after attempt 1: "
+            "the panel rejected the login"
+        ),
+    ]
+
+
+async def test_command_queued_during_a_rejected_login_leaves_the_timed_polls_stopped(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    panel.credentials = {}
+    panel.expire_session()
+    coordinator = mock_config_entry.runtime_data
+    commands: list[asyncio.Task[None]] = []
+
+    def start_command(_request: PanelRequest) -> PanelResult:
+        commands.append(
+            asyncio.get_running_loop().create_task(
+                coordinator.async_send_command(0, PanelCommand.ARM)
+            )
+        )
+        return FakeResponse(body=render_login_page(panel.session_value))
+
+    panel.respond_with("/login_page.html", start_command, times=1)
+
+    await tick(hass, freezer)
+    (command,) = commands
+    try:
+        await settle(hass, command)
+        assert command.done()
+        with pytest.raises(ParadoxAuthError, match=r"^the panel rejected the login$"):
+            await command
+    finally:
+        command.cancel()
+    seen = len(panel.requests)
+    await tick(hass, freezer, 62)
+
+    assert set(panel.request_lines[seen:]) <= {"GET /keep_alive.html?msgid=1"}
+
+
+async def test_command_request_hanging_at_the_deadline_ends_the_command_at_20_s(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    arrived = asyncio.Event()
+    panel.respond_with("/statuslive.html", HTTP_500, times=1, when=is_command)
+    panel.respond_with(
         "/statuslive.html",
-        FakeResponse(status=500, body="error"),
+        lambda _request: hang_and_signal(arrived),
         times=1,
         when=is_command,
     )
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "alarm_disarm", AREA_0)
-
-    assert str(raised.value) == (
-        "The panel did not accept the command for Cast 1: "
-        "Request failed with status code 500"
+    # Called directly: advance waits for the task in which Home Assistant runs a
+    # service call, and that task would wait on the hanging request.
+    task = asyncio.create_task(
+        mock_config_entry.runtime_data.async_send_command(0, PanelCommand.ARM)
     )
+    try:
+        await tick_during(hass, freezer, task, 4)
+        await advance(hass, freezer, 1)
+        await arrived.wait()
+        await advance(hass, freezer, 14)
+        assert not task.done()
+        await advance(hass, freezer, 1)
+        assert task.done()
+        with pytest.raises(CommandNotConfirmedError, match=rf"^{NOT_CONFIRMED}$"):
+            await task
+    finally:
+        task.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST] * 2
+    last = problem_records(caplog)[-1]
+    assert (last.name, last.levelno, last.getMessage()) == (
+        PACKAGE_LOGGER,
+        logging.WARNING,
+        "Command arm for area 1: not confirmed within 20 s after 2 attempts",
+    )
+
+
+async def test_status_read_hanging_at_20_s_ends_a_command_and_keeps_entities_available(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    arrived = asyncio.Event()
+    commands = 0
+
+    def answer(_request: PanelRequest) -> PanelResult:
+        nonlocal commands
+        commands += 1
+        if commands == 2:
+            panel.respond_with(
+                "/statuslive.html",
+                lambda _request: hang_and_signal(arrived),
+                times=1,
+                when=lambda request: not is_command(request),
+            )
+        return FakeResponse(body="<html></html>")
+
+    panel.respond_with("/statuslive.html", answer, times=2, when=is_command)
+
+    coordinator = mock_config_entry.runtime_data
+    # Called directly, as in the test of a hanging command request.
+    task = asyncio.create_task(coordinator.async_send_command(0, PanelCommand.ARM))
+    try:
+        await tick_during(hass, freezer, task, 4)
+        await advance(hass, freezer, 1)
+        await arrived.wait()
+        await advance(hass, freezer, 14)
+        assert not task.done()
+        await advance(hass, freezer, 1)
+        assert task.done()
+        with pytest.raises(CommandNotConfirmedError, match=rf"^{NOT_CONFIRMED}$"):
+            await task
+    finally:
+        task.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST] * 2
+    assert coordinator.last_update_success
+
+
+async def test_timed_poll_queued_behind_a_command_confirms_it_while_its_read_hangs(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    arrived = asyncio.Event()
+    reads = 0
+
+    def is_second_read(request: PanelRequest) -> bool:
+        nonlocal reads
+        if is_command(request):
+            return False
+        reads += 1
+        return reads == 2
+
+    def apply_while_the_poll_falls_due(_request: PanelRequest) -> PanelResult:
+        panel.set_status(useraccess=[2, 0])
+        # The timed poll starts while the command request holds the client, so its
+        # status request queues behind it.
+        freezer.tick(timedelta(seconds=1))
+        async_fire_time_changed(hass)
+        return FakeResponse(body="")
+
+    panel.respond_with(
+        "/statuslive.html", apply_while_the_poll_falls_due, times=1, when=is_command
+    )
+    panel.respond_with(
+        "/statuslive.html",
+        lambda _request: hang_and_signal(arrived),
+        times=1,
+        when=is_second_read,
+    )
+
+    # Called directly, as in the test of a hanging command request.
+    task = asyncio.create_task(
+        mock_config_entry.runtime_data.async_send_command(0, PanelCommand.ARM)
+    )
+    try:
+        await arrived.wait()
+        await advance(hass, freezer, 1)
+        assert task.done()
+        await task
+    finally:
+        task.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST]
+    # A read the command cancelled on returning would clear last_update_success only
+    # on its next turn.
+    await hass.async_block_till_done()
+    assert mock_config_entry.runtime_data.last_update_success
+
+
+async def test_poll_ending_between_two_command_requests_confirms_the_command(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    arrived = asyncio.Event()
+    commands = 0
+
+    def answer(_request: PanelRequest) -> PanelResult:
+        nonlocal commands
+        commands += 1
+        if commands == 2:
+            panel.respond_with(
+                "/statuslive.html",
+                lambda _request: hang_and_signal(arrived),
+                times=1,
+                when=lambda request: not is_command(request),
+            )
+        return FakeResponse(body="")
+
+    def apply_while_the_window_ends(request: PanelRequest) -> PanelResult:
+        panel.set_status(useraccess=[2, 0])
+        # Attempt 1's window ends while this poll holds the client, so attempt 2's
+        # command request queues behind it.
+        freezer.tick(timedelta(seconds=1))
+        async_fire_time_changed(hass)
+        return panel.handle(request)
+
+    panel.respond_with("/statuslive.html", answer, times=2, when=is_command)
+
+    # Called directly, as in the test of a hanging command request.
+    task = asyncio.create_task(
+        mock_config_entry.runtime_data.async_send_command(0, PanelCommand.ARM)
+    )
+    try:
+        await tick_during(hass, freezer, task, 3)
+        panel.respond_with(
+            "/statuslive.html",
+            apply_while_the_window_ends,
+            times=1,
+            when=lambda request: not is_command(request),
+        )
+        await advance(hass, freezer, 1)
+        await arrived.wait()
+        assert task.done()
+        await task
+    finally:
+        task.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST] * 2
+
+
+async def test_command_is_not_sent_again_until_its_status_read_ends(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    seen_at_setup = len(panel.requests)
+    # The command's read fails, and the new login it starts retries the index page
+    # until 7 s, past the end of the first attempt window.
+    panel.respond_with(
+        "/statuslive.html",
+        HTTP_500,
+        times=1,
+        when=lambda request: not is_command(request),
+    )
+    panel.respond_with("/index.html", HTTP_500, times=7)
+
+    # A command sent again during the login queues its own read behind this one, and
+    # settle then fails: that read waits for a lock, not for the clock.
+    await run_while_ticking(hass, freezer, call(hass, "alarm_arm_away", AREA_0), 9)
+
+    index = "GET /index.html"
+    assert [
+        line
+        for line in panel.request_lines[seen_at_setup:]
+        if line in (ARM_REQUEST, index)
+    ] == [ARM_REQUEST] + [index] * 8 + [ARM_REQUEST]
+
+
+async def test_action_for_one_area_does_not_wait_for_an_unconfirmed_action_for_another(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    panel.set_status(useraccess=[1, 2])
+    await setup_entry(hass, mock_config_entry)
+    panel.respond_with(
+        "/statuslive.html",
+        FakeResponse(body="<html></html>"),
+        when=lambda request: request.query.get("area") == "00",
+    )
+
+    arm = asyncio.create_task(call(hass, "alarm_arm_away", AREA_0))
+    try:
+        await settle(hass, arm)
+        await run_while_ticking(hass, freezer, call(hass, "alarm_disarm", AREA_1), 0)
+        assert not arm.done()
+    finally:
+        arm.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST, f"{STATUS}?area=01&value=d"]
+
+
+async def test_actions_for_one_area_reach_the_panel_in_call_order(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    panel.respond_with(
+        "/statuslive.html", FakeResponse(body="<html></html>"), times=1, when=is_command
+    )
+    entity = hass.data[DATA_COMPONENT].get_entity(AREA_0)
+    assert entity is not None
+
+    arm = asyncio.create_task(call(hass, "alarm_arm_away", AREA_0))
+    disarm: asyncio.Task[None] | None = None
+    try:
+        await settle(hass, arm)
+        # Called directly: the task in which Home Assistant runs a service call would
+        # wait on the area's lock, and settle fails on a task that waits for anything
+        # but the clock.
+        disarm = asyncio.create_task(entity.async_alarm_disarm())
+        await tick_during(hass, freezer, arm, 5)
+        await settle(hass, disarm)
+        assert arm.done()
+        assert disarm.done()
+        await arm
+        await disarm
+    finally:
+        arm.cancel()
+        if disarm is not None:
+            disarm.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST, ARM_REQUEST, DISARM_REQUEST]
+    assert alarm_states(hass) == {AREA_0: "disarmed"}
 
 
 async def test_alarm_reported_by_the_panel_makes_the_area_triggered(

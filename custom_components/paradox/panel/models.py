@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 ZONE_OPEN_CODES: Final = frozenset({1, 2, 4, 6, 9})
 
@@ -12,6 +15,15 @@ class PanelCommand(StrEnum):
     STAY = "s"
     SLEEP = "p"
     DISARM = "d"
+
+
+# Exit delay (7) confirms an arm because it outlasts the command deadline.
+CONFIRMED_AREA_CODES: Final[Mapping[PanelCommand, frozenset[int]]] = {
+    PanelCommand.ARM: frozenset({2, 7}),
+    PanelCommand.STAY: frozenset({5, 7, 10}),
+    PanelCommand.SLEEP: frozenset({4, 7}),
+    PanelCommand.DISARM: frozenset({1, 8, 9}),
+}
 
 
 @dataclass(frozen=True, slots=True)

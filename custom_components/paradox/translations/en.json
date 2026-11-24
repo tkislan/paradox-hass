@@ -45,11 +45,16 @@
       "trouble": {
         "name": "Trouble"
       }
+    },
+    "sensor": {
+      "failed_requests": {
+        "name": "Failed requests"
+      }
     }
   },
   "exceptions": {
     "command_failed": {
-      "message": "The panel did not accept the command for {area}: {reason}."
+      "message": "The command for {area} failed: {reason}."
     }
   }
 }

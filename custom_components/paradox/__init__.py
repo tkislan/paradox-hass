@@ -17,7 +17,11 @@ from .panel.client import ParadoxClient
 if TYPE_CHECKING:
     from homeassistant.core import Event, HomeAssistant
 
-PLATFORMS: list[Platform] = [Platform.ALARM_CONTROL_PANEL, Platform.BINARY_SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.ALARM_CONTROL_PANEL,
+    Platform.BINARY_SENSOR,
+    Platform.SENSOR,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ParadoxConfigEntry) -> bool:

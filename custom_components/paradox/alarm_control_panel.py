@@ -1,3 +1,4 @@
+import asyncio
 from typing import TYPE_CHECKING, Final, override
 
 from homeassistant.components.alarm_control_panel import AlarmControlPanelEntity
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
     from .coordinator import ParadoxConfigEntry, ParadoxCoordinator
     from .panel.models import PanelStatus
 
-PARALLEL_UPDATES = 1
+PARALLEL_UPDATES = 0
 
 # Keyed by the area state codes of the panel's tbl_useraccess; ready (8) and not ready
 # (9) both count as disarmed.
@@ -82,6 +83,9 @@ class ParadoxAreaPanel(ParadoxEntity, AlarmControlPanelEntity):
         names = coordinator.layout.area_names
         name = names[index].strip() if index < len(names) else ""
         self._attr_name = name or f"Area {index + 1}"
+        # Commands for one area run in call order, so an arm that is still being
+        # retried never overrides a later disarm. Other areas do not wait for it.
+        self._command_lock = asyncio.Lock()
 
     @property
     @override
@@ -106,11 +110,11 @@ class ParadoxAreaPanel(ParadoxEntity, AlarmControlPanelEntity):
 
     async def _async_send(self, command: PanelCommand) -> None:
         try:
-            await self.coordinator.client.async_command(self._index, command)
+            async with self._command_lock:
+                await self.coordinator.async_send_command(self._index, command)
         except ParadoxError as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="command_failed",
                 translation_placeholders={"area": str(self.name), "reason": str(err)},
             ) from err
-        await self.coordinator.async_request_refresh()

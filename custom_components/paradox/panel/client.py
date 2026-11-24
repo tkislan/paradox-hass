@@ -108,6 +108,12 @@ class ParadoxClient:
     Client for one panel.
 
     The caller owns ``session`` and closes it after ``async_close``.
+
+    ``failed_requests`` counts the requests that ended in ``ParadoxConnectionError``
+    or ``ParadoxHttpError`` since the client was created; a request that aiohttp sent
+    again counts once. ``add_failure_listener(listener)`` calls ``listener`` for each
+    such failure, after the count includes it and before the error is raised, and
+    returns a function that removes the listener.
     """
 
     def __init__(
@@ -124,6 +130,20 @@ class ParadoxClient:
         self._lock = asyncio.Lock()
         self._closed = False
         self._logout_attempted = False
+        self._failed_requests = 0
+        self._failure_listeners: list[Callable[[], None]] = []
+
+    @property
+    def failed_requests(self) -> int:
+        return self._failed_requests
+
+    def add_failure_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        self._failure_listeners.append(listener)
+
+        def remove() -> None:
+            self._failure_listeners.remove(listener)
+
+        return remove
 
     async def async_login(self) -> PanelLayout:
         """
@@ -291,6 +311,9 @@ class ParadoxClient:
             if HTTPStatus.OK <= response.status < HTTPStatus.MULTIPLE_CHOICES:
                 return _decode(body, response.get_encoding())
             error = ParadoxHttpError(response.status)
+        self._failed_requests += 1
+        for listener in self._failure_listeners:
+            listener()
         # Raised outside the handlers: inside one, ``from None`` would still leave the
         # aiohttp exception in ``__context__``.
         raise error from None

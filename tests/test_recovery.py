@@ -251,7 +251,7 @@ async def test_failure_59_s_after_a_login_started_sends_no_login_and_60_s_after_
     panel.respond_with("/statuslive.html", HTTP_500, times=1)
     await tick(hass, freezer)
 
-    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "unavailable")
+    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "off")
     assert len(panel.requests_to("/login_page.html")) == 2
 
     panel.respond_with("/statuslive.html", HTTP_500, times=1)
@@ -281,7 +281,7 @@ async def test_new_login_that_fails_counts_for_the_60_s_rule(
     await tick(hass, freezer)
 
     assert panel.request_lines[seen:] == [STATUS, LOGOUT, "GET /login_page.html"]
-    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "unavailable")
+    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "off")
 
     await tick(hass, freezer)
 
@@ -309,7 +309,7 @@ async def test_hanging_poll_blocks_polls_and_keep_alives_until_its_deadline(
     await advance(hass, freezer, 1)
     await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "unavailable")
+    assert zone_states(hass) == dict.fromkeys(ZONE_ENTITY_IDS, "off")
     await tick(hass, freezer)
 
     assert timeline(panel, seen, started) == [
