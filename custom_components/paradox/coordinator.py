@@ -129,6 +129,7 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
         label = f"Command {command.name.lower()} for area {area + 1}"
         deadline = time.monotonic() + COMMAND_DEADLINE
         attempt = 0
+        good_before: int | None = None
         failure: ParadoxError | None = None
         try:
             async with asyncio.timeout(COMMAND_DEADLINE):
@@ -141,13 +142,15 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
                     failure = await self._async_send_attempt(
                         area, command, label, attempt
                     )
-                    good_before = self._good_polls
+                    # A poll still counts when it ends while a later attempt's request
+                    # waits for the client: it read the status after the first request.
+                    if good_before is None:
+                        good_before = self._good_polls
                     # Cancelling the refresh would make every entity unavailable, and
                     # Home Assistant would drop the next service call.
                     read = self.config_entry.async_create_background_task(
                         self.hass, self.async_refresh(), "paradox command status read"
                     )
-                    await asyncio.wait({read})
                     while True:
                         # No new login may start within 60 s of the rejected one and
                         # Home Assistant has stopped the timed polls, so no later
@@ -172,10 +175,15 @@ class ParadoxCoordinator(DataUpdateCoordinator[PanelStatus]):
                         left = (
                             attempt_started + COMMAND_ATTEMPT_WINDOW - time.monotonic()
                         )
-                        if left <= 0:
+                        # A timed poll queued behind the command request can confirm it
+                        # before this read even starts, and this read can hang for 20 s.
+                        if not read.done():
+                            await asyncio.wait({read}, timeout=COMMAND_CHECK_INTERVAL)
+                        elif left > 0:
+                            await asyncio.sleep(min(COMMAND_CHECK_INTERVAL, left))
+                        else:
                             break
-                        await asyncio.sleep(min(COMMAND_CHECK_INTERVAL, left))
-                    # The sleep that ends the last attempt window can wake before the
+                    # The wait that ends the last attempt window can wake before the
                     # timeout's callback runs, which would start a fifth attempt.
                     # Under the tests' frozen clock both are due together and the
                     # timeout always runs first, so no test reaches this.

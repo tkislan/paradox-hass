@@ -90,15 +90,17 @@ async def settle(hass: HomeAssistant, task: asyncio.Task[Any]) -> None:
     """
     Yield to the event loop until nothing can go on without the clock moving.
 
-    Returns once ``task`` and every future ``hass`` tracks, background tasks included,
-    has ended, is being cancelled, or ``waits_for_the_clock``. Unlike
-    ``hass.async_block_till_done``, it returns while a service call sleeps on the
-    frozen clock. Raises ``AssertionError`` after ``SETTLE_ROUNDS`` turns of the loop
-    otherwise, which includes a request the fake panel holds: its task waits for a
-    socket, not for the clock.
+    Returns once no callback is ready to run, and ``task`` and every future ``hass``
+    tracks, background tasks included, has ended, is being cancelled, or
+    ``waits_for_the_clock``. Unlike ``hass.async_block_till_done``, it returns while a
+    service call sleeps on the frozen clock. Raises ``AssertionError`` after
+    ``SETTLE_ROUNDS`` turns of the loop otherwise, which includes a request the fake
+    panel holds: its task waits for a socket, not for the clock.
     """
     for _ in range(SETTLE_ROUNDS):
-        if all(
+        # Private attribute: a task in asyncio.wait with a timeout on a task that just
+        # ended looks like it waits for the clock until that task's done callbacks run.
+        if not task.get_loop()._ready and all(
             future.done() or cancelling(future) or waits_for_the_clock(future)
             for future in (task, *hass._tasks, *hass._background_tasks)
         ):

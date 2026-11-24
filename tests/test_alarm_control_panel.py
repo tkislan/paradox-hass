@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING, Final
 
 import pytest
@@ -12,6 +13,7 @@ from homeassistant.const import Platform
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.paradox.const import DOMAIN
 from custom_components.paradox.coordinator import CommandNotConfirmedError
@@ -801,6 +803,144 @@ async def test_status_read_hanging_at_20_s_ends_a_command_and_keeps_entities_ava
 
     assert command_lines(panel) == [ARM_REQUEST] * 2
     assert coordinator.last_update_success
+
+
+async def test_timed_poll_queued_behind_a_command_confirms_it_while_its_read_hangs(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    arrived = asyncio.Event()
+    reads = 0
+
+    def is_second_read(request: PanelRequest) -> bool:
+        nonlocal reads
+        if is_command(request):
+            return False
+        reads += 1
+        return reads == 2
+
+    def apply_while_the_poll_falls_due(_request: PanelRequest) -> PanelResult:
+        panel.set_status(useraccess=[2, 0])
+        # The timed poll starts while the command request holds the client, so its
+        # status request queues behind it.
+        freezer.tick(timedelta(seconds=1))
+        async_fire_time_changed(hass)
+        return FakeResponse(body="")
+
+    panel.respond_with(
+        "/statuslive.html", apply_while_the_poll_falls_due, times=1, when=is_command
+    )
+    panel.respond_with(
+        "/statuslive.html",
+        lambda _request: hang_and_signal(arrived),
+        times=1,
+        when=is_second_read,
+    )
+
+    # Called directly, as in the test of a hanging command request.
+    task = asyncio.create_task(
+        mock_config_entry.runtime_data.async_send_command(0, PanelCommand.ARM)
+    )
+    try:
+        await arrived.wait()
+        await advance(hass, freezer, 1)
+        assert task.done()
+        await task
+    finally:
+        task.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST]
+    # A read the command cancelled on returning would clear last_update_success only
+    # on its next turn.
+    await hass.async_block_till_done()
+    assert mock_config_entry.runtime_data.last_update_success
+
+
+async def test_poll_ending_between_two_command_requests_confirms_the_command(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    arrived = asyncio.Event()
+    commands = 0
+
+    def answer(_request: PanelRequest) -> PanelResult:
+        nonlocal commands
+        commands += 1
+        if commands == 2:
+            panel.respond_with(
+                "/statuslive.html",
+                lambda _request: hang_and_signal(arrived),
+                times=1,
+                when=lambda request: not is_command(request),
+            )
+        return FakeResponse(body="")
+
+    def apply_while_the_window_ends(request: PanelRequest) -> PanelResult:
+        panel.set_status(useraccess=[2, 0])
+        # Attempt 1's window ends while this poll holds the client, so attempt 2's
+        # command request queues behind it.
+        freezer.tick(timedelta(seconds=1))
+        async_fire_time_changed(hass)
+        return panel.handle(request)
+
+    panel.respond_with("/statuslive.html", answer, times=2, when=is_command)
+
+    # Called directly, as in the test of a hanging command request.
+    task = asyncio.create_task(
+        mock_config_entry.runtime_data.async_send_command(0, PanelCommand.ARM)
+    )
+    try:
+        await tick_during(hass, freezer, task, 3)
+        panel.respond_with(
+            "/statuslive.html",
+            apply_while_the_window_ends,
+            times=1,
+            when=lambda request: not is_command(request),
+        )
+        await advance(hass, freezer, 1)
+        await arrived.wait()
+        assert task.done()
+        await task
+    finally:
+        task.cancel()
+
+    assert command_lines(panel) == [ARM_REQUEST] * 2
+
+
+async def test_command_is_not_sent_again_until_its_status_read_ends(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    panel: FakePanel,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    await setup_entry(hass, mock_config_entry)
+    seen_at_setup = len(panel.requests)
+    # The command's read fails, and the new login it starts retries the index page
+    # until 7 s, past the end of the first attempt window.
+    panel.respond_with(
+        "/statuslive.html",
+        HTTP_500,
+        times=1,
+        when=lambda request: not is_command(request),
+    )
+    panel.respond_with("/index.html", HTTP_500, times=7)
+
+    # A command sent again during the login queues its own read behind this one, and
+    # settle then fails: that read waits for a lock, not for the clock.
+    await run_while_ticking(hass, freezer, call(hass, "alarm_arm_away", AREA_0), 9)
+
+    index = "GET /index.html"
+    assert [
+        line
+        for line in panel.request_lines[seen_at_setup:]
+        if line in (ARM_REQUEST, index)
+    ] == [ARM_REQUEST] + [index] * 8 + [ARM_REQUEST]
 
 
 async def test_action_for_one_area_does_not_wait_for_an_unconfirmed_action_for_another(
