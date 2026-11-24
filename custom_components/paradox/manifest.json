@@ -1,6 +1,7 @@
 {
   "domain": "paradox",
   "name": "Paradox IP150",
+  "categories": ["security_safety.alarm_systems"],
   "codeowners": ["@tkislan"],
   "config_flow": true,
   "documentation": "https://github.com/tkislan/paradox-hass",
