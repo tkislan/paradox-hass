@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from _pytest.mark import ParameterSet
     from freezegun.api import FrozenDateTimeFactory
     from homeassistant.core import HomeAssistant
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
+    from pytest_homeassistant.common import MockConfigEntry
 
     from tests.fake_panel import FakePanel
 

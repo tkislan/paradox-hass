@@ -3,7 +3,7 @@ import socket
 from typing import TYPE_CHECKING
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.paradox.const import DOMAIN
 from tests.fake_panel import FakePanel, FakePanelOptions
@@ -76,11 +76,6 @@ def refused_host(socket_enabled: None) -> Iterator[str]:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         yield f"127.0.0.1:{sock.getsockname()[1]}"
-
-
-@pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
-    """Let Home Assistant load ``custom_components/paradox`` in every test."""
 
 
 @pytest.fixture
