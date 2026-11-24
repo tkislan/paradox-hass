@@ -1,0 +1,24 @@
+name: Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 8 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.9"
+          enable-cache: true
+          cache-suffix: audit
+      - run: uv export --locked --all-groups --no-emit-project --quiet --format pylock.toml --output-file "$RUNNER_TEMP/audit/pylock.toml"
+      - run: uv run --locked --only-group audit pip-audit --strict --locked "$RUNNER_TEMP/audit"
